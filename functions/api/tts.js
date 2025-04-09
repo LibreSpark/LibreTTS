@@ -57,14 +57,8 @@ async function handleCloudflareRequest(request) {
           const download = !body.preview;
           
           const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
-          
-          return new Response(Buffer.from(response.base64, 'base64'), {
-            status: 200,
-            headers: {
-              "Content-Type": "audio/mpeg",
-              ...makeCORSHeaders()
-            }
-          });
+          // Forward the response directly
+          return response;
         } catch (error) {
           return new Response(JSON.stringify({ error: error.message }), {
             status: 400,
@@ -84,14 +78,7 @@ async function handleCloudflareRequest(request) {
         
         try {
           const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
-          
-          return new Response(Buffer.from(response.base64, 'base64'), {
-            status: 200,
-            headers: {
-              "Content-Type": "audio/mpeg",
-              ...makeCORSHeaders()
-            }
-          });
+          return response;
         } catch (error) {
           return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
@@ -154,49 +141,53 @@ async function handleNetlifyRequest(event, context) {
   }
 }
 
-async function handleVoicesCloudflare(url) {
-  const localeFilter = (url.searchParams.get("l") || "").toLowerCase();
-  const format = url.searchParams.get("f");
+async function getVoice(text, voiceName, rate, pitch, outputFormat, download) {
+  await refreshEndpoint();
   
-  try {
-    let voices = await voiceList();
-    if (localeFilter) {
-      voices = voices.filter(item => item.Locale.toLowerCase().includes(localeFilter));
-    }
-    
-    if (format === "0") {
-      const formattedVoices = voices.map(item => formatVoiceItem(item));
-      return new Response(formattedVoices.join("\n"), {
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          ...makeCORSHeaders()
-        }
-      });
-    } else if (format === "1") {
-      const voiceMap = Object.fromEntries(voices.map(item => [item.ShortName, item.LocalName]));
-      return new Response(JSON.stringify(voiceMap), {
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...makeCORSHeaders()
-        }
-      });
-    } else {
-      return new Response(JSON.stringify(voices), {
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...makeCORSHeaders()
-        }
-      });
-    }
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message || "Failed to fetch voices" }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        ...makeCORSHeaders()
-      }
-    });
+  // Generate SSML
+  const ssml = generateSsml(text, voiceName, rate, pitch);
+  
+  // Get URL and endpoint from Microsoft Translator service
+  const url = `https://${endpoint.r}.tts.speech.microsoft.com/cognitiveservices/v1`;
+  
+  // Set up headers correctly
+  const headers = {
+    "Authorization": endpoint.t, // Don't add Bearer - endpoint.t already includes it
+    "Content-Type": "application/ssml+xml",
+    "X-Microsoft-OutputFormat": outputFormat,
+    "User-Agent": "okhttp/4.5.0",
+    "Origin": "https://azure.microsoft.com",
+    "Referer": "https://azure.microsoft.com/"
+  };
+  
+  // Make the request to Microsoft's TTS service
+  const response = await fetch(url, {
+    method: "POST",
+    headers: headers,
+    body: ssml
+  });
+
+  // Handle errors
+  if (!response.ok) {
+    throw new Error(`TTS 请求失败，状态码 ${response.status}`);
   }
+
+  // Create a new response with the appropriate headers
+  const newResponse = new Response(response.body, response);
+  if (download) {
+    newResponse.headers.set("Content-Disposition", `attachment; filename="${voiceName}.mp3"`);
+  }
+  
+  // Add CORS headers
+  return addCORSHeaders(newResponse);
+}
+
+function addCORSHeaders(response) {
+  const newHeaders = new Headers(response.headers);
+  Object.entries(makeCORSHeaders()).forEach(([key, value]) => {
+    newHeaders.set(key, value);
+  });
+  return new Response(response.body, { ...response, headers: newHeaders });
 }
 
 async function handleTTSPostNetlify(event) {
@@ -209,18 +200,55 @@ async function handleTTSPostNetlify(event) {
     const outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
     const download = !body.preview;
     
-    const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
+    await refreshEndpoint();
+  
+    // Generate SSML
+    const ssml = generateSsml(text, voiceName, rate, pitch);
+    
+    // Get URL and endpoint from Microsoft Translator service
+    const url = `https://${endpoint.r}.tts.speech.microsoft.com/cognitiveservices/v1`;
+    
+    // Set up headers correctly
+    const headers = {
+      "Authorization": endpoint.t,
+      "Content-Type": "application/ssml+xml",
+      "X-Microsoft-OutputFormat": outputFormat,
+      "User-Agent": "okhttp/4.5.0"
+    };
+    
+    // Make the request to Microsoft's TTS service
+    const response = await fetch(url, {
+      method: "POST",
+      headers: headers,
+      body: ssml
+    });
+  
+    // Handle errors
+    if (!response.ok) {
+      throw new Error(`TTS 请求失败，状态码 ${response.status}`);
+    }
+    
+    // For Netlify, we need to convert to base64
+    const buffer = await response.arrayBuffer();
+    const base64Data = btoa(
+      new Uint8Array(buffer).reduce(
+        (data, byte) => data + String.fromCharCode(byte),
+        ''
+      )
+    );
     
     return {
       statusCode: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        ...makeCORSHeaders()
+        ...makeCORSHeaders(),
+        ...(download ? { "Content-Disposition": `attachment; filename="${voiceName}.mp3"` } : {})
       },
       isBase64Encoded: true,
-      body: response.base64
+      body: base64Data
     };
   } catch (error) {
+    console.error("TTS Post Error:", error);
     return {
       statusCode: 400,
       headers: {
@@ -241,184 +269,93 @@ async function handleTTSGetNetlify(url) {
   const download = url.searchParams.get("d") === "true";
 
   try {
-    const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
+    await refreshEndpoint();
+  
+    // Generate SSML
+    const ssml = generateSsml(text, voiceName, rate, pitch);
+    
+    // Get URL and endpoint from Microsoft Translator service
+    const url = `https://${endpoint.r}.tts.speech.microsoft.com/cognitiveservices/v1`;
+    
+    // Set up headers correctly
+    const headers = {
+      "Authorization": endpoint.t,
+      "Content-Type": "application/ssml+xml",
+      "X-Microsoft-OutputFormat": outputFormat,
+      "User-Agent": "okhttp/4.5.0"
+    };
+    
+    // Make the request to Microsoft's TTS service
+    const response = await fetch(url, {
+      method: "POST",
+      headers: headers,
+      body: ssml
+    });
+  
+    // Handle errors
+    if (!response.ok) {
+      throw new Error(`TTS 请求失败，状态码 ${response.status}`);
+    }
+    
+    // For Netlify, we need to convert to base64
+    const buffer = await response.arrayBuffer();
+    const base64Data = btoa(
+      new Uint8Array(buffer).reduce(
+        (data, byte) => data + String.fromCharCode(byte),
+        ''
+      )
+    );
     
     return {
       statusCode: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        ...makeCORSHeaders()
+        ...makeCORSHeaders(),
+        ...(download ? { "Content-Disposition": `attachment; filename="${voiceName}.mp3"` } : {})
       },
       isBase64Encoded: true,
-      body: response.base64
+      body: base64Data
     };
   } catch (error) {
     return {
       statusCode: 500,
-      headers: makeCORSHeaders(),
+      headers: {
+        "Content-Type": "application/json",
+        ...makeCORSHeaders()
+      },
       body: JSON.stringify({ error: error.message || "Internal Server Error" })
     };
   }
 }
 
-async function handleVoicesNetlify(url) {
-  const localeFilter = (url.searchParams.get("l") || "").toLowerCase();
-  const format = url.searchParams.get("f");
-  
-  try {
-    let voices = await voiceList();
-    if (localeFilter) {
-      voices = voices.filter(item => item.Locale.toLowerCase().includes(localeFilter));
-    }
-    
-    if (format === "0") {
-      const formattedVoices = voices.map(item => formatVoiceItem(item));
-      return {
-        statusCode: 200,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          ...makeCORSHeaders()
-        },
-        body: formattedVoices.join("\n")
-      };
-    } else if (format === "1") {
-      const voiceMap = Object.fromEntries(voices.map(item => [item.ShortName, item.LocalName]));
-      return {
-        statusCode: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...makeCORSHeaders()
-        },
-        body: JSON.stringify(voiceMap)
-      };
-    } else {
-      return {
-        statusCode: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...makeCORSHeaders()
-        },
-        body: JSON.stringify(voices)
-      };
-    }
-  } catch (error) {
-    return {
-      statusCode: 500,
-      headers: makeCORSHeaders(),
-      body: JSON.stringify({ error: error.message || "Failed to fetch voices" })
-    };
-  }
-}
-
-function getDefaultHTML(url) {
-  const baseUrl = `${url.protocol}//${url.host}/api`;
-  return `
-  <ol>
-      <li> /tts?t=[text]&v=[voice]&r=[rate]&p=[pitch]&o=[outputFormat] <a href="${baseUrl}/tts?t=hello, world&v=zh-CN-XiaoxiaoMultilingualNeural&r=0&p=0&o=audio-24khz-48kbitrate-mono-mp3">试试</a> </li>
-      <li> /voices?l=[locale, 如 zh|zh-CN]&f=[format, 0/1/空 0(TTS-Server)|1(MultiTTS)] <a href="${baseUrl}/voices?l=zh&f=1">试试</a> </li>
-  </ol>
-  `;
-}
-
-async function getVoice(text, voiceName, rate, pitch, outputFormat, download) {
-  await refreshEndpoint();
-  
-  const ssml = generateSsml(text, voiceName, rate, pitch);
-  const url = endpoint.ttsUrl;
-  
-  const headers = {
-    "Authorization": `Bearer ${endpoint.t}`,
-    "Content-Type": "application/ssml+xml",
-    "X-Microsoft-OutputFormat": outputFormat,
-    "User-Agent": "edgeTTS4R",
-    "Origin": "https://azure.microsoft.com",
-    "Referer": "https://azure.microsoft.com/",
-    "X-ClientTraceId": clientId
-  };
-  
-  if (download) {
-    headers["Content-Disposition"] = `attachment; filename="${voiceName}.mp3"`;
-  }
-  
-  const response = await fetch(url, {
-    method: "POST",
-    headers: headers,
-    body: encoder.encode(ssml)
-  });
-  
-  if (!response.ok) {
-    throw new Error(`获取语音失败，状态码 ${response.status}`);
-  }
-  
-  const buffer = await response.arrayBuffer();
-  return { 
-    base64: Buffer.from(buffer).toString('base64')
-  };
-}
-
-function generateSsml(text, voiceName, rate, pitch) {
-  return `<speak xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" version="1.0" xml:lang="zh-CN"> 
-              <voice name="${voiceName}"> 
-                  <mstts:express-as style="general" styledegree="1.0" role="default"> 
-                      <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${text}</prosody> 
-                  </mstts:express-as> 
-              </voice> 
-          </speak>`;
-}
-
-function formatVoiceItem(item) {
-  return `
-- !!org.nobody.multitts.tts.speaker.Speaker
-  avatar: ''
-  code: ${item.ShortName}
-  desc: ''
-  extendUI: ''
-  gender: ${item.Gender === "Female" ? "0" : "1"}
-  name: ${item.LocalName}
-  note: 'wpm: ${item.WordsPerMinute || ""}'
-  param: ''
-  sampleRate: ${item.SampleRateHertz || "24000"}
-  speed: 1.5
-  type: 1
-  volume: 1`;
-}
-
-async function voiceList() {
-  const headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "X-Ms-Useragent": "SpeechStudio/2021.05.001",
-    "Content-Type": "application/json",
-    "Origin": "https://azure.microsoft.com",
-    "Referer": "https://azure.microsoft.com"
-  };
-  
-  const response = await fetch("https://eastus.api.speech.microsoft.com/cognitiveservices/voices/list", {
-    headers: headers
-  });
-  
-  if (!response.ok) {
-    throw new Error(`获取语音列表失败，状态码 ${response.status}`);
-  }
-  
-  return await response.json();
-}
-
-function makeCORSHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, x-auth-token",
-    "Access-Control-Max-Age": "86400"
-  };
-}
-
 async function refreshEndpoint() {
   if (!expiredAt || Date.now() / 1000 > expiredAt - 60) {
     endpoint = await getEndpoint();
-    const decodedJwt = JSON.parse(Buffer.from(endpoint.t.split(".")[1], "base64").toString());
-    expiredAt = decodedJwt.exp;
-    clientId = uuid();
-    console.log(`获取 Endpoint, 过期时间剩余: ${((expiredAt - Date.now() / 1000) / 60).toFixed(2)} 分钟`);
+    // For Cloudflare Workers/Pages, atob() is available but Buffer isn't
+    try {
+      // Check if we're in Node.js or Cloudflare environment
+      const isNodejs = typeof Buffer !== 'undefined';
+      
+      if (isNodejs) {
+        const decodedJwt = JSON.parse(Buffer.from(endpoint.t.split(".")[1], "base64").toString());
+        expiredAt = decodedJwt.exp;
+      } else {
+        const base64 = endpoint.t.split(".")[1].replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        
+        const decodedJwt = JSON.parse(jsonPayload);
+        expiredAt = decodedJwt.exp;
+      }
+      
+      clientId = crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(36).substring(2, 15);
+      console.log(`获取 Endpoint, 过期时间剩余: ${((expiredAt - Date.now() / 1000) / 60).toFixed(2)} 分钟`);
+    } catch (error) {
+      console.error("无法解析JWT:", error);
+      // Set a default expiry time in case of error
+      expiredAt = (Date.now() / 1000) + 3600; // 1 hour from now
+    }
   } else {
     console.log(`过期时间剩余: ${((expiredAt - Date.now() / 1000) / 60).toFixed(2)} 分钟`);
   }
@@ -431,7 +368,7 @@ async function getEndpoint() {
     "X-ClientVersion": "4.0.530a 5fe1dc6c",
     "X-UserId": "0f04d16a175c411e",
     "X-HomeGeographicRegion": "zh-Hans-CN",
-    "X-ClientTraceId": clientId,
+    "X-ClientTraceId": clientId || "76a75279-2ffa-4c3d-8db8-7b47252aa41c",
     "X-MT-Signature": await generateSignature(endpointUrl),
     "User-Agent": "okhttp/4.5.0",
     "Content-Type": "application/json; charset=utf-8",
@@ -453,12 +390,46 @@ async function getEndpoint() {
 async function generateSignature(urlStr) {
   const url = urlStr.split("://")[1];
   const encodedUrl = encodeURIComponent(url);
-  const uuidStr = uuid();
+  const uuidStr = crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(36).substring(2, 15);
   const formattedDate = formatDate();
-  const bytesToSign = `MSTranslatorAndroidApp${encodedUrl}${formattedDate}${uuidStr}`.toLowerCase();
-  const decodedKey = await base64ToBytes("oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw==");
-  const signature = await hmacSha256(decodedKey, bytesToSign);
-  const signatureBase64 = await bytesToBase64(signature);
+  
+  // Use different approach based on the environment (Node.js vs Browser/Cloudflare)
+  let signatureBase64;
+  
+  try {
+    // Determine if we're in Node environment
+    if (typeof Buffer !== 'undefined' && typeof require === 'function') {
+      const crypto = require('crypto');
+      const key = Buffer.from("oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw==", 'base64');
+      const bytesToSign = `MSTranslatorAndroidApp${encodedUrl}${formattedDate}${uuidStr}`.toLowerCase();
+      
+      const hmac = crypto.createHmac('sha256', key);
+      hmac.update(bytesToSign);
+      signatureBase64 = hmac.digest('base64');
+    } else {
+      // For Cloudflare Workers/Pages
+      const key = await crypto.subtle.importKey(
+        'raw',
+        base64ToArrayBuffer("oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw=="),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+      );
+      
+      const bytesToSign = `MSTranslatorAndroidApp${encodedUrl}${formattedDate}${uuidStr}`.toLowerCase();
+      const signature = await crypto.subtle.sign(
+        'HMAC',
+        key,
+        new TextEncoder().encode(bytesToSign)
+      );
+      
+      signatureBase64 = arrayBufferToBase64(signature);
+    }
+  } catch (error) {
+    console.error("Generate signature error:", error);
+    throw error;
+  }
+  
   return `MSTranslatorAndroidApp::${signatureBase64}::${formattedDate}::${uuidStr}`;
 }
 
@@ -468,23 +439,25 @@ function formatDate() {
   return utcString.toLowerCase();
 }
 
-async function hmacSha256(key, data) {
-  const crypto = require('crypto');
-  const hmac = crypto.createHmac('sha256', Buffer.from(key));
-  hmac.update(data);
-  return Buffer.from(hmac.digest());
+// Helper functions for Cloudflare environment
+function base64ToArrayBuffer(base64) {
+  const binary_string = atob(base64);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+      bytes[i] = binary_string.charCodeAt(i);
+  }
+  return bytes.buffer;
 }
 
-async function base64ToBytes(base64) {
-  return Buffer.from(base64, 'base64');
-}
-
-async function bytesToBase64(bytes) {
-  return Buffer.from(bytes).toString('base64');
-}
-
-function uuid() {
-  return require('crypto').randomUUID().replace(/-/g, "");
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 // Export the handler function for different serverless platforms
