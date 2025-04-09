@@ -3,50 +3,40 @@ let expiredAt = null;
 let endpoint = null;
 let clientId = "76a75279-2ffa-4c3d-8db8-7b47252aa41c";
 
-export async function onRequestGet(context) {
+export async function onRequest(context) {
   const { request } = context;
-  return handleRequest(request);
+  
+  if (request.method === "OPTIONS") {
+    return handleOptions();
+  }
+  
+  const url = new URL(request.url);
+  const path = url.pathname;
+  
+  switch (path) {
+    case "/api/tts":
+      return handleTTS(url, request);
+    case "/api/voices":
+      return handleVoices(url);
+    default:
+      return handleDefault(url);
+  }
 }
 
-export async function onRequestPost(context) {
-  const { request } = context;
-  return handleRequest(request);
-}
-
-export async function onRequestOptions(context) {
+function handleOptions() {
   return new Response(null, {
     status: 204,
     headers: {
       ...makeCORSHeaders(),
-      "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type"
     }
   });
 }
 
-async function handleRequest(request) {
-  if (request.method === "OPTIONS") {
-    return onRequestOptions({ request });
-  }
-
-  // 移除了身份验证检查，无须认证
-
-  const requestUrl = new URL(request.url);
-  const path = requestUrl.pathname;
-  
-  switch (path) {
-    case "/api/tts":
-      return handleTTS(requestUrl, request);
-    case "/api/voices":
-      return handleVoices(requestUrl);
-    default:
-      return handleDefault(requestUrl);
-  }
-}
-
-async function handleTTS(requestUrl, request) {
-  if (request.method === "POST") {
-    try {
+async function handleTTS(url, request) {
+  try {
+    if (request.method === "POST") {
       const body = await request.json();
       const text = body.text || "";
       const voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
@@ -57,39 +47,37 @@ async function handleTTS(requestUrl, request) {
       
       const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
       return addCORSHeaders(response);
-    } catch (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          ...makeCORSHeaders()
-        }
-      });
-    }
-  } else {
-    // GET 请求处理
-    const text = requestUrl.searchParams.get("t") || "";
-    const voiceName = requestUrl.searchParams.get("v") || "zh-CN-XiaoxiaoMultilingualNeural";
-    const rate = Number(requestUrl.searchParams.get("r")) || 0;
-    const pitch = Number(requestUrl.searchParams.get("p")) || 0;
-    const outputFormat = requestUrl.searchParams.get("o") || "audio-24khz-48kbitrate-mono-mp3";
-    const download = requestUrl.searchParams.get("d") === "true";
-    
-    try {
+    } else {
+      // GET 请求处理
+      const text = url.searchParams.get("t") || "";
+      const voiceName = url.searchParams.get("v") || "zh-CN-XiaoxiaoMultilingualNeural";
+      const rate = Number(url.searchParams.get("r")) || 0;
+      const pitch = Number(url.searchParams.get("p")) || 0;
+      const outputFormat = url.searchParams.get("o") || "audio-24khz-48kbitrate-mono-mp3";
+      const download = url.searchParams.get("d") === "true";
+      
       const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
       return addCORSHeaders(response);
-    } catch (error) {
-      return new Response("Internal Server Error", { status: 500, headers: makeCORSHeaders() });
     }
+  } catch (error) {
+    console.error("TTS Error:", error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        ...makeCORSHeaders()
+      }
+    });
   }
 }
 
-async function handleVoices(requestUrl) {
-  const localeFilter = (requestUrl.searchParams.get("l") || "").toLowerCase();
-  const format = requestUrl.searchParams.get("f");
-  
+async function handleVoices(url) {
   try {
+    const localeFilter = (url.searchParams.get("l") || "").toLowerCase();
+    const format = url.searchParams.get("f");
+    
     let voices = await voiceList();
+    
     if (localeFilter) {
       voices = voices.filter(item => item.Locale.toLowerCase().includes(localeFilter));
     }
@@ -98,7 +86,7 @@ async function handleVoices(requestUrl) {
       const formattedVoices = voices.map(item => formatVoiceItem(item));
       return new Response(formattedVoices.join("\n"), {
         headers: {
-          "Content-Type": "application/html; charset=utf-8",
+          "Content-Type": "text/plain; charset=utf-8",
           ...makeCORSHeaders()
         }
       });
@@ -119,19 +107,24 @@ async function handleVoices(requestUrl) {
       });
     }
   } catch (error) {
-    return new Response("Internal Server Error", { 
-      status: 500, 
-      headers: makeCORSHeaders() 
+    console.error("Voices Error:", error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        ...makeCORSHeaders()
+      }
     });
   }
 }
 
-function handleDefault(requestUrl) {
-  const baseUrl = `${requestUrl.protocol}//${requestUrl.host}`;
+function handleDefault(url) {
+  const baseUrl = `${url.protocol}//${url.host}`;
   const htmlContent = `
+  <h1>内置 TTS API</h1>
   <ol>
-    <li> /api/tts?t=[text]&v=[voice]&r=[rate]&p=[pitch]&o=[outputFormat] <a href="${baseUrl}/api/tts?t=hello, world&v=zh-CN-XiaoxiaoMultilingualNeural&r=0&p=0&o=audio-24khz-48kbitrate-mono-mp3">试试</a> </li>
-    <li> /api/voices?l=[locale, 如 zh|zh-CN]&f=[format, 0/1/空 0(TTS-Server)|1(MultiTTS)] <a href="${baseUrl}/api/voices?l=zh&f=1">试试</a> </li>
+    <li>/api/tts?t=[text]&v=[voice]&r=[rate]&p=[pitch]&o=[outputFormat] <a href="${baseUrl}/api/tts?t=hello, world&v=zh-CN-XiaoxiaoMultilingualNeural&r=0&p=0&o=audio-24khz-48kbitrate-mono-mp3">试试</a></li>
+    <li>/api/voices?l=[locale, 如 zh|zh-CN]&f=[format, 0/1/空 0(TTS-Server)|1(MultiTTS)] <a href="${baseUrl}/api/voices?l=zh&f=1">试试</a></li>
   </ol>
   `;
   return new Response(htmlContent, {
@@ -160,15 +153,15 @@ async function getVoice(text, voiceName, rate, pitch, outputFormat, download) {
     body: ssml
   });
 
-  if (response.ok) {
-    const newResponse = new Response(response.body, response);
-    if (download) {
-      newResponse.headers.set("Content-Disposition", `attachment; filename="${uuid()}.mp3"`);
-    }
-    return newResponse;
-  } else {
+  if (!response.ok) {
     throw new Error(`TTS 请求失败，状态码 ${response.status}`);
   }
+
+  const newResponse = new Response(response.body, response);
+  if (download) {
+    newResponse.headers.set("Content-Disposition", `attachment; filename="${uuid()}.mp3"`);
+  }
+  return newResponse;
 }
 
 function generateSsml(text, voiceName, rate, pitch) {
@@ -208,19 +201,14 @@ async function voiceList() {
   };
   
   const response = await fetch("https://eastus.api.speech.microsoft.com/cognitiveservices/voices/list", {
-    headers: headers,
-    cf: {
-      cacheTtl: 600,
-      cacheEverything: true,
-      cacheKey: "mstrans-voice-list"
-    }
+    headers: headers
   });
   
   if (!response.ok) {
     throw new Error(`获取语音列表失败，状态码 ${response.status}`);
   }
   
-  return response.json();
+  return await response.json();
 }
 
 function addCORSHeaders(response) {
@@ -234,7 +222,7 @@ function addCORSHeaders(response) {
 function makeCORSHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400"
   };
@@ -275,7 +263,7 @@ async function getEndpoint() {
     throw new Error(`获取 Endpoint 失败，状态码 ${response.status}`);
   }
   
-  return response.json();
+  return await response.json();
 }
 
 async function generateSignature(urlStr) {
@@ -319,7 +307,9 @@ async function base64ToBytes(base64) {
 
 async function bytesToBase64(bytes) {
   let binary = '';
-  bytes.forEach(b => binary += String.fromCharCode(b));
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
   return btoa(binary);
 }
 
