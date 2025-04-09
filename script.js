@@ -6,17 +6,15 @@ let isGenerating = false;
 
 const API_CONFIG = {
     'workers-api': {
-        url: '/api/tts',
-        authToken: '' // 内部集成，无须认证
+        url: '/api/tts'
+        // Removed authToken - no authentication required
     },
     'deno-api': {
         url: 'https://deno-tts.api.zwei.de.eu.org/tts'
     },
     'oai-tts': {
-        // 使用代理服务而不是直接访问
+        // 使用deno代理服务而不是直接访问
         url: 'https://oai-tts.zwei.de.eu.org/v1/audio/speech'
-        // 备用URL，可以在部署后替换
-        // url: 'https://your-deno-proxy-url.deno.dev/v1/audio/speech'
     }
 };
 
@@ -297,15 +295,7 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
             'Content-Type': 'application/json'
         };
         
-        // 如果是 workers-api，添加认证头
-        if (apiName === 'workers-api') {
-            const authToken = API_CONFIG[apiName].authToken;
-            if (!authToken || authToken === '请替换为您的实际API密钥') {
-                throw new Error('API密钥未正确配置');
-            }
-
-            headers['x-auth-token'] = authToken;
-        }
+        // Removed API key validation logic - no authentication required
 
         // 使用传入的speakerId（如果有）或者当前选择的speakerId
         const voice = speakerId || $('#speaker').val();
@@ -350,11 +340,6 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
             headers: headers,
             body: JSON.stringify(requestBody)
         });
-
-        if (response.status === 401) {
-            console.error('认证失败，服务器返回 401');
-            throw new Error('API认证失败，请检查API密钥设置');
-        }
 
         if (!response.ok) {
             console.error('服务器响应错误:', response.status, response.statusText);
@@ -770,93 +755,95 @@ async function generateVoiceForLongText(segments, currentRequestId, currentSpeak
 
         while (retryCount < MAX_RETRIES && !success) {
             try {
-                const progress = ((i + 1) / totalSegments * 100).toFixed(1);
-                const retryInfo = retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES})` : '';
-                updateLoadingProgress(
+    
+                const progress = ((i + 1) / totalSegments * 100).toFixed(1);showLoading('');
+    
+                const retryInfo = retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES})` : '';lSegment = false;
+                updateLoadingProgress(const MAX_RETRIES = 3;
                     progress, 
-                    `正在生成#${currentRequestId}请求的 ${i + 1}/${totalSegments} 段语音${retryInfo}...`
-                );
+                    `正在生成#${currentRequestId}请求的 ${i + 1}/${totalSegments} 段语音${retryInfo}...`gments.length; i++) {
+                );        let retryCount = 0;
                 
-                // 为OAI-TTS API使用相同的instructions
+                // 为OAI-TTS API使用相同的instructionsl;
                 let instructions = null;
-                if (apiName === 'oai-tts') {
-                    instructions = $('#instructions').val().trim();
-                }
-                
+                if (apiName === 'oai-tts') {AX_RETRIES && !success) {
+                    instructions = $('#instructions').val().trim();            try {
+                }nts * 100).toFixed(1);
+                onst retryInfo = retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES})` : '';
                 const blob = await makeRequest(
                     apiUrl, 
-                    false, 
+                    false, uestId}请求的 ${i + 1}/${totalSegments} 段语音${retryInfo}...`
                     segments[i], 
                     apiName === 'deno-api', 
-                    `#${currentRequestId}(${i + 1}/${totalSegments})`,
-                    currentSpeakerId // 传递固定的讲述人ID
+                    `#${currentRequestId}(${i + 1}/${totalSegments})`, 为OAI-TTS API使用相同的instructions
+                    currentSpeakerId // 传递固定的讲述人IDlet instructions = null;
                 );
-                
+                nstructions').val().trim();
                 if (blob) {
                     hasSuccessfulSegment = true;
-                    success = true;
-                    results.push(blob);
+                    success = true;onst blob = await makeRequest(
+                    results.push(blob);    apiUrl, 
                     const timestamp = new Date().toLocaleTimeString();
-                    // 使用传入的讲述人名称，而不是重新获取
-                    const cleanSegmentText = segments[i].replace(/<break\s+time=["'](\d+(?:\.\d+)?[ms]s?)["']\s*\/>/g, '');
-                    const shortenedSegmentText = cleanSegmentText.length > 7 ? cleanSegmentText.substring(0, 7) + '...' : cleanSegmentText;
-                    const requestInfo = `#${currentRequestId}(${i + 1}/${totalSegments})`;
+                    // 使用传入的讲述人名称，而不是重新获取[i], 
+                    const cleanSegmentText = segments[i].replace(/<break\s+time=["'](\d+(?:\.\d+)?[ms]s?)["']\s*\/>/g, ''); === 'deno-api', 
+                    const shortenedSegmentText = cleanSegmentText.length > 7 ? cleanSegmentText.substring(0, 7) + '...' : cleanSegmentText;questId}(${i + 1}/${totalSegments})`,
+                    const requestInfo = `#${currentRequestId}(${i + 1}/${totalSegments})`;的讲述人ID
                     addHistoryItem(timestamp, currentSpeakerText, shortenedSegmentText, blob, requestInfo);
                 }
-            } catch (error) {
-                lastError = error;
-                retryCount++;
+            } catch (error) { (blob) {
+                lastError = error;    hasSuccessfulSegment = true;
+                retryCount++; = true;
                 
-                if (retryCount < MAX_RETRIES) {
-                    console.error(`分段 ${i + 1} 生成失败 (重试 ${retryCount}/${MAX_RETRIES}):`, error);
-                    const waitTime = 3000 + (retryCount * 2000);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                if (retryCount < MAX_RETRIES) { = new Date().toLocaleTimeString();
+                    console.error(`分段 ${i + 1} 生成失败 (重试 ${retryCount}/${MAX_RETRIES}):`, error);获取
+                    const waitTime = 3000 + (retryCount * 2000);ak\s+time=["'](\d+(?:\.\d+)?[ms]s?)["']\s*\/>/g, '');
+                    await new Promise(resolve => setTimeout(resolve, waitTime));tText = cleanSegmentText.length > 7 ? cleanSegmentText.substring(0, 7) + '...' : cleanSegmentText;
                 } else {
                     showError(`第 ${i + 1}/${totalSegments} 段生成失败：${error.message}`);
                 }
             }
-        }
+        }astError = error;
 
         if (!success) {
-            console.error(`分段 ${i + 1} 在 ${MAX_RETRIES} 次尝试后仍然失败:`, lastError);
-        }
-
+            console.error(`分段 ${i + 1} 在 ${MAX_RETRIES} 次尝试后仍然失败:`, lastError);t < MAX_RETRIES) {
+        }    console.error(`分段 ${i + 1} 生成失败 (重试 ${retryCount}/${MAX_RETRIES}):`, error);
+tryCount * 2000);
         if (success && i < segments.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 3000));
-        }
+        }}`);
     }
 
     hideLoading();
 
-    if (results.length > 0) {
-        const finalBlob = new Blob(results, { type: 'audio/mpeg' });
+    if (results.length > 0) {f (!success) {
+        const finalBlob = new Blob(results, { type: 'audio/mpeg' });            console.error(`分段 ${i + 1} 在 ${MAX_RETRIES} 次尝试后仍然失败:`, lastError);
         const timestamp = new Date().toLocaleTimeString();
         // 使用传入的讲述人名称，而不是重新获取
-        const mergeRequestInfo = `#${currentRequestId}(合并)`;
-        addHistoryItem(timestamp, currentSpeakerText, shortenedText, finalBlob, mergeRequestInfo);
+        const mergeRequestInfo = `#${currentRequestId}(合并)`;f (success && i < segments.length - 1) {
+        addHistoryItem(timestamp, currentSpeakerText, shortenedText, finalBlob, mergeRequestInfo);            await new Promise(resolve => setTimeout(resolve, 3000));
         return finalBlob;
     }
 
-    throw new Error('所有片段生成失败');
+    throw new Error('所有片段生成失败');ideLoading();
 }
+ngth > 0) {
+// 在 body 末尾添加 toast 容器        const finalBlob = new Blob(results, { type: 'audio/mpeg' });
+$('body').append('<div class="toast-container"></div>'); Date().toLocaleTimeString();
 
-// 在 body 末尾添加 toast 容器
-$('body').append('<div class="toast-container"></div>');
-
-// 可以添加其他类型的消息提示
-function showWarning(message) {
+// 可以添加其他类型的消息提示`;
+function showWarning(message) {amp, currentSpeakerText, shortenedText, finalBlob, mergeRequestInfo);
     showMessage(message, 'warning');
 }
 
-function showInfo(message) {
-    showMessage(message, 'info');
+function showInfo(message) {hrow new Error('所有片段生成失败');
+    showMessage(message, 'info');}
 }
-
-// 可以添加其他类型的消息提示
+/ 在 body 末尾添加 toast 容器
+// 可以添加其他类型的消息提示$('body').append('<div class="toast-container"></div>');
 function showWarning(message) {
     showMessage(message, 'warning');
-}
-
+}function showWarning(message) {
+message, 'warning');
 function showInfo(message) {
     showMessage(message, 'info');
 }
