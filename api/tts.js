@@ -251,11 +251,12 @@ export default async function handler(req, res) {
     
     // 处理标准 Node.js 环境 (Express/Next.js)
     try {
+        // 内部请求无需验证，直接处理
         if (req.method === 'OPTIONS') {
             // 处理 CORS 预检
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-            res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-auth-token');
             res.status(204).end();
             return;
         }
@@ -317,10 +318,12 @@ async function handleEdgeRequest(request) {
             headers: {
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type'
+                'Access-Control-Allow-Headers': 'Content-Type, x-auth-token'
             }
         });
     }
+
+    // 内部集成的 API 不验证令牌
 
     try {
         if (path.endsWith('/voices')) {

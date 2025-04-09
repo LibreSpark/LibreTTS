@@ -297,14 +297,13 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
             'Content-Type': 'application/json'
         };
         
-        // 如果是 workers-api，添加认证头
-        if (apiName === 'workers-api') {
+        // 如果是 workers-api 且不是指向内部路径的请求，才添加认证头
+        if (apiName === 'workers-api' && !url.startsWith('/')) {
             const authToken = API_CONFIG[apiName].authToken;
-            if (!authToken || authToken === '请替换为您的实际API密钥') {
-                throw new Error('API密钥未正确配置');
+            // 只有当配置了明确的非空 authToken 时才添加认证头
+            if (authToken && authToken.trim() !== '' && authToken !== '请替换为您的实际API密钥') {
+                headers['x-auth-token'] = authToken;
             }
-
-            headers['x-auth-token'] = authToken;
         }
 
         // 使用传入的speakerId（如果有）或者当前选择的speakerId
