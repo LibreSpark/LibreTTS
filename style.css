@@ -78,7 +78,7 @@ body {
     margin-bottom: 12px;
     background: linear-gradient(145deg, #ffffff 0%, #f8faff 100%);
     border: 1px solid rgba(99, 102, 241, 0.08);
-    transition: all 0.2s ease;
+    transition: all 0.3s ease;
     padding: 1rem;
     cursor: pointer;
 }
@@ -87,7 +87,7 @@ body {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08);
     border-color: rgba(99, 102, 241, 0.15);
-    background: linear-gradient(145deg, #f8faff 0%, #f0f7ff 100%);
+    background-color: #f8f9fa;
 }
 
 .btn-group .btn {
@@ -116,6 +116,12 @@ footer a:hover {
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
 
+audio {
+    width: 100%;
+    margin-top: 15px;
+    border-radius: 8px;
+}
+
 .form-control {
     border-radius: 10px;
     border: 1px solid rgba(74, 144, 226, 0.15);
@@ -131,6 +137,10 @@ footer a:hover {
     border-color: #6bb5ff;
     box-shadow: 0 0 0 0.2rem rgba(74, 144, 226, 0.12);
     background: #ffffff;
+}
+
+.form-control:hover {
+    border-color: rgba(74, 144, 226, 0.3);
 }
 
 .btn {
@@ -169,6 +179,21 @@ footer a:hover {
     border-color: #4cae4c;
 }
 
+.btn-warning {
+    background: linear-gradient(145deg, #fbbf24 0%, #f59e0b 100%);
+    border: none;
+    color: white;
+}
+
+.btn-warning:hover {
+    background: linear-gradient(145deg, #f59e0b 0%, #d97706 100%);
+    color: white;
+}
+
+.btn:active {
+    transform: scale(0.98);
+}
+
 .alert {
     border-radius: 10px;
     border: none;
@@ -188,43 +213,18 @@ footer a:hover {
     to { transform: rotate(360deg); }
 }
 
-.btn-warning {
-    background: linear-gradient(145deg, #fbbf24 0%, #f59e0b 100%);
-    border: none;
-    color: white;
-}
-
-.btn-warning:hover {
-    background: linear-gradient(145deg, #f59e0b 0%, #d97706 100%);
-    color: white;
-}
-
-/* 添加按钮点击反馈效果 */
-.btn:active {
-    transform: scale(0.98);
-}
-
-/* 优化表单控件悬停状态 */
-.form-control:hover {
-    border-color: rgba(74, 144, 226, 0.3);
-}
-
-/* 添加悬浮提示框样式 */
 .toast-container {
     position: fixed;
     top: 20px;
     right: 20px;
-    z-index: 1050;
+    z-index: 9999;
+    max-width: 300px;
 }
 
 .toast {
-    min-width: 200px;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 10px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    margin-bottom: 10px;
-    transition: all 0.3s ease;
     opacity: 0;
+    transition: opacity 0.3s ease;
+    margin-bottom: 10px;
 }
 
 .toast.show {
@@ -232,25 +232,32 @@ footer a:hover {
 }
 
 .toast-body {
-    padding: 1rem;
-    color: #fff;
-    border-radius: 10px;
+    padding: 12px 15px;
+    border-radius: 8px;
+    color: white;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .toast-danger {
-    background: linear-gradient(145deg, #ef4444 0%, #dc2626 100%);
+    background-color: #dc3545;
 }
 
 .toast-warning {
-    background: linear-gradient(145deg, #f59e0b 0%, #d97706 100%);
+    background-color: #ffc107;
+    color: #212529;
 }
 
 .toast-info {
-    background: linear-gradient(145deg, #3b82f6 0%, #2563eb 100%);
+    background-color: #17a2b8;
+}
+
+.toast-success {
+    background-color: #28a745;
 }
 
 .toast-loading {
-    min-width: 300px;
+    background-color: #007bff;
+    color: white;
 }
 
 .toast-loading .progress {
@@ -267,4 +274,24 @@ footer a:hover {
 
 .toast-loading .fa-spinner {
     margin-right: 8px;
+}
+
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.loading-content {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
 }

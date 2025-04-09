@@ -343,7 +343,61 @@ async function handleEdgeRequest(request) {
     }
 
     try {
-        if (path.endsWith('/voices')) {
+        // 处理首页请求，提供简单的API使用说明
+        if (path === '/' || path === '') {
+            const htmlContent = `
+            <html>
+                <head>
+                    <title>TTS API 使用示例</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+                        pre { background: #f4f4f4; padding: 10px; border-radius: 5px; }
+                        .example { margin-bottom: 20px; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Ciallo TTS API</h1>
+                    <p>这是 Ciallo TTS 的API服务，您可以通过以下方式使用:</p>
+                    
+                    <div class="example">
+                        <h3>获取语音列表:</h3>
+                        <pre>GET /api/voices</pre>
+                    </div>
+                    
+                    <div class="example">
+                        <h3>生成语音(POST):</h3>
+                        <pre>
+POST /api/tts
+Content-Type: application/json
+
+{
+  "text": "要转换的文本",
+  "voice": "zh-CN-XiaoxiaoMultilingualNeural",
+  "rate": 0,
+  "pitch": 0,
+  "preview": false
+}
+                        </pre>
+                    </div>
+                    
+                    <div class="example">
+                        <h3>生成语音(GET):</h3>
+                        <pre>GET /api/tts?text=要转换的文本&voice=zh-CN-XiaoxiaoMultilingualNeural&rate=0&pitch=0&preview=false</pre>
+                    </div>
+                </body>
+            </html>
+            `;
+            
+            return new Response(htmlContent, {
+                status: 200,
+                headers: {
+                    'Content-Type': 'text/html; charset=utf-8',
+                    'Access-Control-Allow-Origin': '*'
+                }
+            });
+        }
+
+        if (path.endsWith('/voices') || path === '/api/voices') {
             const voices = await voiceList();
             return new Response(JSON.stringify(voices), {
                 status: 200,
@@ -354,29 +408,17 @@ async function handleEdgeRequest(request) {
             });
         }
 
+        // 统一处理各种 tts 路径
         if (path.endsWith('/tts') || path === '/api/tts') {
-            // 同时支持 GET 和 POST 方法
-            if (request.method === 'POST' || request.method === 'GET') {
-                // 根据请求方法获取参数
-                let text, voiceName, rate, pitch, outputFormat, download;
-                
-                if (request.method === 'POST') {
-                    const body = await request.json();
-                    text = body.text || "";
-                    voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
-                    rate = Number(body.rate) || 0;
-                    pitch = Number(body.pitch) || 0;
-                    outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
-                    download = !body.preview;
-                } else { // GET 方法
-                    const query = url.searchParams;
-                    text = query.get('text') || "";
-                    voiceName = query.get('voice') || "zh-CN-XiaoxiaoMultilingualNeural";
-                    rate = Number(query.get('rate')) || 0;
-                    pitch = Number(query.get('pitch')) || 0;
-                    outputFormat = query.get('format') || "audio-24khz-48kbitrate-mono-mp3";
-                    download = query.get('preview') !== 'true';
-                }
+            // GET 请求参数处理
+            if (request.method === 'GET') {
+                const query = url.searchParams;
+                const text = query.get('text') || "";
+                const voiceName = query.get('voice') || "zh-CN-XiaoxiaoMultilingualNeural";
+                const rate = Number(query.get('rate')) || 0;
+                const pitch = Number(query.get('pitch')) || 0;
+                const outputFormat = query.get('format') || "audio-24khz-48kbitrate-mono-mp3";
+                const download = query.get('preview') !== 'true';
                 
                 if (!text) {
                     return new Response(JSON.stringify({ error: '请输入文本' }), {
@@ -388,22 +430,80 @@ async function handleEdgeRequest(request) {
                     });
                 }
                 
-                const result = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
-                
-                const headers = {
-                    'Content-Type': 'audio/mpeg',
-                    'Access-Control-Allow-Origin': '*'
-                };
-                
-                if (download && result.headers['Content-Disposition']) {
-                    headers['Content-Disposition'] = result.headers['Content-Disposition'];
+                try {
+                    const result = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
+                    
+                    const headers = {
+                        'Content-Type': 'audio/mpeg',
+                        'Access-Control-Allow-Origin': '*'
+                    };
+                    
+                    if (download && result.headers['Content-Disposition']) {
+                        headers['Content-Disposition'] = result.headers['Content-Disposition'];
+                    }
+                    
+                    return new Response(result.data, {
+                        status: 200,
+                        headers: headers
+                    });
+                } catch (error) {
+                    return new Response(JSON.stringify({ error: error.message }), {
+                        status: 500,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*'
+                        }
+                    });
                 }
-                
-                return new Response(result.data, {
-                    status: 200,
-                    headers: headers
-                });
-            } else {
+            } 
+            // POST 请求处理
+            else if (request.method === 'POST') {
+                try {
+                    const body = await request.json();
+                    const text = body.text || "";
+                    const voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
+                    const rate = Number(body.rate) || 0;
+                    const pitch = Number(body.pitch) || 0;
+                    const outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
+                    const download = !body.preview;
+                    
+                    if (!text) {
+                        return new Response(JSON.stringify({ error: '请输入文本' }), {
+                            status: 400,
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Access-Control-Allow-Origin': '*'
+                            }
+                        });
+                    }
+                    
+                    const result = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
+                    
+                    const headers = {
+                        'Content-Type': 'audio/mpeg',
+                        'Access-Control-Allow-Origin': '*'
+                    };
+                    
+                    if (download && result.headers['Content-Disposition']) {
+                        headers['Content-Disposition'] = result.headers['Content-Disposition'];
+                    }
+                    
+                    return new Response(result.data, {
+                        status: 200,
+                        headers: headers
+                    });
+                } catch (error) {
+                    return new Response(JSON.stringify({ error: error.message || '处理请求出错' }), {
+                        status: 500,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*'
+                        }
+                    });
+                }
+            }
+            // 其他方法返回 405
+            else {
                 return new Response(JSON.stringify({ error: '仅支持 GET 和 POST 请求' }), {
                     status: 405,
                     headers: {
@@ -414,6 +514,7 @@ async function handleEdgeRequest(request) {
             }
         }
 
+        // 未找到对应资源
         return new Response(JSON.stringify({ error: '未找到请求的资源' }), {
             status: 404,
             headers: {
@@ -423,7 +524,7 @@ async function handleEdgeRequest(request) {
         });
     } catch (error) {
         console.error('API错误:', error);
-        return new Response(JSON.stringify({ error: error.message }), {
+        return new Response(JSON.stringify({ error: error.message || '服务器内部错误' }), {
             status: 500,
             headers: {
                 'Content-Type': 'application/json',

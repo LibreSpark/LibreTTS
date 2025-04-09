@@ -4,6 +4,7 @@
     "exclude": [],
     "routes": [
       { "pattern": "/api/tts", "script": "api/tts.js" },
-      { "pattern": "/api/voices", "script": "api/tts.js" }
+      { "pattern": "/api/voices", "script": "api/tts.js" },
+      { "pattern": "/api/*", "script": "api/tts.js" }
     ]
-  }
+}
