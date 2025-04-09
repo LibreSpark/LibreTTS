@@ -7,7 +7,7 @@ let isGenerating = false;
 const API_CONFIG = {
     'workers-api': {
         url: '/api/tts'
-        // No authentication required
+        // Removed authToken - internal API integration doesn't need authentication
     },
     'deno-api': {
         url: 'https://deno-tts.api.zwei.de.eu.org/tts'
@@ -295,7 +295,7 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
             'Content-Type': 'application/json'
         };
         
-        // Removed API key validation logic - no authentication required
+        // Removed API key validation logic since we don't need authentication anymore
 
         // 使用传入的speakerId（如果有）或者当前选择的speakerId
         const voice = speakerId || $('#speaker').val();
@@ -340,6 +340,8 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
             headers: headers,
             body: JSON.stringify(requestBody)
         });
+
+        // Removed 401 error handling since we don't need authentication anymore
 
         if (!response.ok) {
             console.error('服务器响应错误:', response.status, response.statusText);
@@ -757,7 +759,6 @@ async function generateVoiceForLongText(segments, currentRequestId, currentSpeak
             try {
                 const progress = ((i + 1) / totalSegments * 100).toFixed(1);
                 const retryInfo = retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES})` : '';
-                
                 updateLoadingProgress(
                     progress, 
                     `正在生成#${currentRequestId}请求的 ${i + 1}/${totalSegments} 段语音${retryInfo}...`
@@ -828,6 +829,15 @@ async function generateVoiceForLongText(segments, currentRequestId, currentSpeak
 
 // 在 body 末尾添加 toast 容器
 $('body').append('<div class="toast-container"></div>');
+
+// 可以添加其他类型的消息提示
+function showWarning(message) {
+    showMessage(message, 'warning');
+}
+
+function showInfo(message) {
+    showMessage(message, 'info');
+}
 
 // 可以添加其他类型的消息提示
 function showWarning(message) {
