@@ -37,14 +37,8 @@
     <link rel="apple-touch-icon" href="image/TTS.png">
     <link rel="shortcut icon" type="image/png" href="image/TTS.png">
 
-    <!-- 添加安全相关的meta标签 -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://1220.tts-api.zwei.de.eu.org https://deno-tts.api.zwei.de.eu.org https://oai-tts.zwei.de.eu.org https://oai-tts.deno.dev; 
-    script-src 'self' 'unsafe-inline' https://code.jquery.com https://cdnjs.cloudflare.com https://maxcdn.bootstrapcdn.com https://static.cloudflareinsights.com; 
-    style-src 'self' 'unsafe-inline' https://maxcdn.bootstrapcdn.com https://cdnjs.cloudflare.com; 
-    img-src 'self' data: https:; 
-    media-src 'self' blob: https:; 
-    connect-src 'self' https://1220.tts-api.zwei.de.eu.org https://deno-tts.api.zwei.de.eu.org https://oai-tts.zwei.de.eu.org https://oai-tts.deno.dev;
-    font-src 'self' https://cdnjs.cloudflare.com;">
+    <!-- 取消所有安全限制 -->
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src * data: blob:;">
     
 
     <!-- 建议添加预加载关键资源 -->
