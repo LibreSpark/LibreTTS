@@ -1,4 +1,0 @@
-/*
-  X-Frame-Options: DENY
-  X-Content-Type-Options: nosniff
-  Content-Security-Policy: default-src 'self' https://1220.tts-api.zwei.de.eu.org/ https://deno-tts.api.zwei.de.eu.org https://oai-tts.zwei.de.eu.org https://oai-tts.deno.dev; script-src 'self' 'unsafe-inline' https://code.jquery.com https://cdnjs.cloudflare.com https://maxcdn.bootstrapcdn.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://maxcdn.bootstrapcdn.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; media-src 'self' blob: https:; font-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' https://1220.tts-api.zwei.de.eu.org/ https://deno-tts.api.zwei.de.eu.org https://oai-tts.zwei.de.eu.org https://oai-tts.deno.dev;
