@@ -3,42 +3,18 @@ let expiredAt = null;
 let endpoint = null;
 let clientId = "76a75279-2ffa-4c3d-8db8-7b47252aa41c";
 
-exports.handler = async function(event, context) {
+// This function works with both Netlify and Cloudflare Pages functions
+async function handler(event, context) {
   try {
-    const path = event.path.replace(/^\/api/, '');
-    const url = new URL(event.rawUrl);
+    // Normalize the event object for different serverless environments
+    const isCloudflare = event.request !== undefined;
     
-    // Handle CORS preflight requests
-    if (event.httpMethod === "OPTIONS") {
-      return {
-        statusCode: 204,
-        headers: {
-          ...makeCORSHeaders(),
-          "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, x-auth-token"
-        }
-      };
-    }
-
-    // Handle API endpoints
-    switch (path) {
-      case '/tts':
-        if (event.httpMethod === "POST") {
-          return await handleTTSPost(event);
-        } else {
-          return await handleTTSGet(url);
-        }
-      case '/voices':
-        return await handleVoices(url);
-      default:
-        return {
-          statusCode: 200,
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            ...makeCORSHeaders()
-          },
-          body: getDefaultHTML(url)
-        };
+    if (isCloudflare) {
+      // Cloudflare Pages format
+      return await handleCloudflareRequest(event.request);
+    } else {
+      // Netlify Functions format
+      return await handleNetlifyRequest(event, context);
     }
   } catch (error) {
     console.error("API Error:", error);
@@ -48,9 +24,182 @@ exports.handler = async function(event, context) {
       body: JSON.stringify({ error: error.message || "Internal Server Error" })
     };
   }
-};
+}
 
-async function handleTTSPost(event) {
+// Handle Cloudflare Pages request format
+async function handleCloudflareRequest(request) {
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/^\/api/, '');
+  
+  // Handle CORS preflight requests
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...makeCORSHeaders(),
+        "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, x-auth-token"
+      }
+    });
+  }
+  
+  // Handle API endpoints
+  switch (path) {
+    case '/tts':
+      if (request.method === "POST") {
+        try {
+          const body = await request.json();
+          const text = body.text || "";
+          const voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
+          const rate = Number(body.rate) || 0;
+          const pitch = Number(body.pitch) || 0;
+          const outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
+          const download = !body.preview;
+          
+          const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
+          
+          return new Response(Buffer.from(response.base64, 'base64'), {
+            status: 200,
+            headers: {
+              "Content-Type": "audio/mpeg",
+              ...makeCORSHeaders()
+            }
+          });
+        } catch (error) {
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 400,
+            headers: {
+              "Content-Type": "application/json",
+              ...makeCORSHeaders()
+            }
+          });
+        }
+      } else {
+        const text = url.searchParams.get("t") || "";
+        const voiceName = url.searchParams.get("v") || "zh-CN-XiaoxiaoMultilingualNeural";
+        const rate = Number(url.searchParams.get("r")) || 0;
+        const pitch = Number(url.searchParams.get("p")) || 0;
+        const outputFormat = url.searchParams.get("o") || "audio-24khz-48kbitrate-mono-mp3";
+        const download = url.searchParams.get("d") === "true";
+        
+        try {
+          const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
+          
+          return new Response(Buffer.from(response.base64, 'base64'), {
+            status: 200,
+            headers: {
+              "Content-Type": "audio/mpeg",
+              ...makeCORSHeaders()
+            }
+          });
+        } catch (error) {
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500,
+            headers: {
+              "Content-Type": "application/json",
+              ...makeCORSHeaders()
+            }
+          });
+        }
+      }
+    case '/voices':
+      return await handleVoicesCloudflare(url);
+    default:
+      return new Response(getDefaultHTML(url), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          ...makeCORSHeaders()
+        }
+      });
+  }
+}
+
+// Handle Netlify Functions request format
+async function handleNetlifyRequest(event, context) {
+  const path = event.path.replace(/^\/api/, '');
+  const url = new URL(event.rawUrl);
+  
+  // Handle CORS preflight requests
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers: {
+        ...makeCORSHeaders(),
+        "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, x-auth-token"
+      }
+    };
+  }
+  
+  // Handle API endpoints
+  switch (path) {
+    case '/tts':
+      if (event.httpMethod === "POST") {
+        return await handleTTSPostNetlify(event);
+      } else {
+        return await handleTTSGetNetlify(url);
+      }
+    case '/voices':
+      return await handleVoicesNetlify(url);
+    default:
+      return {
+        statusCode: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          ...makeCORSHeaders()
+        },
+        body: getDefaultHTML(url)
+      };
+  }
+}
+
+async function handleVoicesCloudflare(url) {
+  const localeFilter = (url.searchParams.get("l") || "").toLowerCase();
+  const format = url.searchParams.get("f");
+  
+  try {
+    let voices = await voiceList();
+    if (localeFilter) {
+      voices = voices.filter(item => item.Locale.toLowerCase().includes(localeFilter));
+    }
+    
+    if (format === "0") {
+      const formattedVoices = voices.map(item => formatVoiceItem(item));
+      return new Response(formattedVoices.join("\n"), {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          ...makeCORSHeaders()
+        }
+      });
+    } else if (format === "1") {
+      const voiceMap = Object.fromEntries(voices.map(item => [item.ShortName, item.LocalName]));
+      return new Response(JSON.stringify(voiceMap), {
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          ...makeCORSHeaders()
+        }
+      });
+    } else {
+      return new Response(JSON.stringify(voices), {
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          ...makeCORSHeaders()
+        }
+      });
+    }
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message || "Failed to fetch voices" }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        ...makeCORSHeaders()
+      }
+    });
+  }
+}
+
+async function handleTTSPostNetlify(event) {
   try {
     const body = JSON.parse(event.body);
     const text = body.text || "";
@@ -83,7 +232,7 @@ async function handleTTSPost(event) {
   }
 }
 
-async function handleTTSGet(url) {
+async function handleTTSGetNetlify(url) {
   const text = url.searchParams.get("t") || "";
   const voiceName = url.searchParams.get("v") || "zh-CN-XiaoxiaoMultilingualNeural";
   const rate = Number(url.searchParams.get("r")) || 0;
@@ -112,7 +261,7 @@ async function handleTTSGet(url) {
   }
 }
 
-async function handleVoices(url) {
+async function handleVoicesNetlify(url) {
   const localeFilter = (url.searchParams.get("l") || "").toLowerCase();
   const format = url.searchParams.get("f");
   
@@ -337,3 +486,7 @@ async function bytesToBase64(bytes) {
 function uuid() {
   return require('crypto').randomUUID().replace(/-/g, "");
 }
+
+// Export the handler function for different serverless platforms
+exports.handler = handler;
+module.exports = handler;
