@@ -274,14 +274,33 @@ export default async function handler(req, res) {
         }
         
         if (path.endsWith('/tts') || path === '/api/tts') {
-            if (req.method === 'POST') {
-                const body = req.body;
-                const text = body.text || "";
-                const voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
-                const rate = Number(body.rate) || 0;
-                const pitch = Number(body.pitch) || 0;
-                const outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
-                const download = !body.preview;
+            // 同时支持 GET 和 POST 方法
+            if (req.method === 'POST' || req.method === 'GET') {
+                // 根据请求方法获取参数
+                let text, voiceName, rate, pitch, outputFormat, download;
+                
+                if (req.method === 'POST') {
+                    const body = req.body;
+                    text = body.text || "";
+                    voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
+                    rate = Number(body.rate) || 0;
+                    pitch = Number(body.pitch) || 0;
+                    outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
+                    download = !body.preview;
+                } else { // GET 方法
+                    const query = new URL(req.url, `http://${req.headers.host}`).searchParams;
+                    text = query.get('text') || "";
+                    voiceName = query.get('voice') || "zh-CN-XiaoxiaoMultilingualNeural";
+                    rate = Number(query.get('rate')) || 0;
+                    pitch = Number(query.get('pitch')) || 0;
+                    outputFormat = query.get('format') || "audio-24khz-48kbitrate-mono-mp3";
+                    download = query.get('preview') !== 'true';
+                }
+                
+                if (!text) {
+                    res.status(400).json({ error: '请输入文本' });
+                    return;
+                }
                 
                 const result = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
                 
@@ -294,7 +313,7 @@ export default async function handler(req, res) {
                 // 发送二进制数据
                 res.status(200).send(Buffer.from(result.data));
             } else {
-                res.status(405).json({ error: '只支持 POST 请求' });
+                res.status(405).json({ error: '仅支持 GET 和 POST 请求' });
             }
             return;
         }
@@ -323,8 +342,6 @@ async function handleEdgeRequest(request) {
         });
     }
 
-    // 内部集成的 API 不验证令牌
-
     try {
         if (path.endsWith('/voices')) {
             const voices = await voiceList();
@@ -338,14 +355,38 @@ async function handleEdgeRequest(request) {
         }
 
         if (path.endsWith('/tts') || path === '/api/tts') {
-            if (request.method === 'POST') {
-                const body = await request.json();
-                const text = body.text || "";
-                const voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
-                const rate = Number(body.rate) || 0;
-                const pitch = Number(body.pitch) || 0;
-                const outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
-                const download = !body.preview;
+            // 同时支持 GET 和 POST 方法
+            if (request.method === 'POST' || request.method === 'GET') {
+                // 根据请求方法获取参数
+                let text, voiceName, rate, pitch, outputFormat, download;
+                
+                if (request.method === 'POST') {
+                    const body = await request.json();
+                    text = body.text || "";
+                    voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
+                    rate = Number(body.rate) || 0;
+                    pitch = Number(body.pitch) || 0;
+                    outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
+                    download = !body.preview;
+                } else { // GET 方法
+                    const query = url.searchParams;
+                    text = query.get('text') || "";
+                    voiceName = query.get('voice') || "zh-CN-XiaoxiaoMultilingualNeural";
+                    rate = Number(query.get('rate')) || 0;
+                    pitch = Number(query.get('pitch')) || 0;
+                    outputFormat = query.get('format') || "audio-24khz-48kbitrate-mono-mp3";
+                    download = query.get('preview') !== 'true';
+                }
+                
+                if (!text) {
+                    return new Response(JSON.stringify({ error: '请输入文本' }), {
+                        status: 400,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*'
+                        }
+                    });
+                }
                 
                 const result = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
                 
@@ -363,7 +404,7 @@ async function handleEdgeRequest(request) {
                     headers: headers
                 });
             } else {
-                return new Response(JSON.stringify({ error: '只支持 POST 请求' }), {
+                return new Response(JSON.stringify({ error: '仅支持 GET 和 POST 请求' }), {
                     status: 405,
                     headers: {
                         'Content-Type': 'application/json',

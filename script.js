@@ -344,15 +344,43 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
 
         console.log('发送请求到:', url);
         
+        // 确保请求方法始终为 POST
         const response = await fetch(url, {
-            method: 'POST',
+            method: 'POST', // 明确指定 POST 方法
             headers: headers,
             body: JSON.stringify(requestBody)
         });
 
+        // 检查是否有权限问题
         if (response.status === 401) {
             console.error('认证失败，服务器返回 401');
             throw new Error('API认证失败，请检查API密钥设置');
+        }
+        
+        // 特殊处理 405 错误 - 可能是服务器不支持 POST 方法
+        if (response.status === 405) {
+            console.warn('服务器不支持 POST 方法，尝试使用 GET 方法...');
+            // 构建 GET 请求 URL
+            const params = new URLSearchParams({
+                text: text,
+                voice: voice,
+                rate: parseInt($('#rate').val()),
+                pitch: parseInt($('#pitch').val()),
+                preview: isPreview ? 'true' : 'false'
+            });
+            
+            // 发送 GET 请求
+            const getResponse = await fetch(`${url}?${params.toString()}`, {
+                method: 'GET',
+                headers: headers
+            });
+            
+            if (!getResponse.ok) {
+                console.error('GET 请求也失败了:', getResponse.status, getResponse.statusText);
+                throw new Error(`服务器响应错误: ${getResponse.status}`);
+            }
+            
+            return await getResponse.blob();
         }
 
         if (!response.ok) {
