@@ -3,174 +3,217 @@ let expiredAt = null;
 let endpoint = null;
 let clientId = "76a75279-2ffa-4c3d-8db8-7b47252aa41c";
 
-export async function onRequest(context) {
-  const { request } = context;
-  
-  if (request.method === "OPTIONS") {
-    return handleOptions();
-  }
-  
-  const url = new URL(request.url);
-  const path = url.pathname;
-  
-  switch (path) {
-    case "/api/tts":
-      return handleTTS(url, request);
-    case "/api/voices":
-      return handleVoices(url);
-    default:
-      return handleDefault(url);
-  }
-}
-
-function handleOptions() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      ...makeCORSHeaders(),
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type"
-    }
-  });
-}
-
-async function handleTTS(url, request) {
+exports.handler = async function(event, context) {
   try {
-    if (request.method === "POST") {
-      const body = await request.json();
-      const text = body.text || "";
-      const voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
-      const rate = Number(body.rate) || 0;
-      const pitch = Number(body.pitch) || 0;
-      const outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
-      const download = !body.preview;
-      
-      const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
-      return addCORSHeaders(response);
-    } else {
-      // GET 请求处理
-      const text = url.searchParams.get("t") || "";
-      const voiceName = url.searchParams.get("v") || "zh-CN-XiaoxiaoMultilingualNeural";
-      const rate = Number(url.searchParams.get("r")) || 0;
-      const pitch = Number(url.searchParams.get("p")) || 0;
-      const outputFormat = url.searchParams.get("o") || "audio-24khz-48kbitrate-mono-mp3";
-      const download = url.searchParams.get("d") === "true";
-      
-      const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
-      return addCORSHeaders(response);
+    const path = event.path.replace(/^\/api/, '');
+    const url = new URL(event.rawUrl);
+    
+    // Handle CORS preflight requests
+    if (event.httpMethod === "OPTIONS") {
+      return {
+        statusCode: 204,
+        headers: {
+          ...makeCORSHeaders(),
+          "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, x-auth-token"
+        }
+      };
+    }
+
+    // Handle API endpoints
+    switch (path) {
+      case '/tts':
+        if (event.httpMethod === "POST") {
+          return await handleTTSPost(event);
+        } else {
+          return await handleTTSGet(url);
+        }
+      case '/voices':
+        return await handleVoices(url);
+      default:
+        return {
+          statusCode: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            ...makeCORSHeaders()
+          },
+          body: getDefaultHTML(url)
+        };
     }
   } catch (error) {
-    console.error("TTS Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
+    console.error("API Error:", error);
+    return {
+      statusCode: 500,
+      headers: makeCORSHeaders(),
+      body: JSON.stringify({ error: error.message || "Internal Server Error" })
+    };
+  }
+};
+
+async function handleTTSPost(event) {
+  try {
+    const body = JSON.parse(event.body);
+    const text = body.text || "";
+    const voiceName = body.voice || "zh-CN-XiaoxiaoMultilingualNeural";
+    const rate = Number(body.rate) || 0;
+    const pitch = Number(body.pitch) || 0;
+    const outputFormat = body.format || "audio-24khz-48kbitrate-mono-mp3";
+    const download = !body.preview;
+    
+    const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
+    
+    return {
+      statusCode: 200,
+      headers: {
+        "Content-Type": "audio/mpeg",
+        ...makeCORSHeaders()
+      },
+      isBase64Encoded: true,
+      body: response.base64
+    };
+  } catch (error) {
+    return {
+      statusCode: 400,
       headers: {
         "Content-Type": "application/json",
         ...makeCORSHeaders()
-      }
-    });
+      },
+      body: JSON.stringify({ error: error.message })
+    };
+  }
+}
+
+async function handleTTSGet(url) {
+  const text = url.searchParams.get("t") || "";
+  const voiceName = url.searchParams.get("v") || "zh-CN-XiaoxiaoMultilingualNeural";
+  const rate = Number(url.searchParams.get("r")) || 0;
+  const pitch = Number(url.searchParams.get("p")) || 0;
+  const outputFormat = url.searchParams.get("o") || "audio-24khz-48kbitrate-mono-mp3";
+  const download = url.searchParams.get("d") === "true";
+
+  try {
+    const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
+    
+    return {
+      statusCode: 200,
+      headers: {
+        "Content-Type": "audio/mpeg",
+        ...makeCORSHeaders()
+      },
+      isBase64Encoded: true,
+      body: response.base64
+    };
+  } catch (error) {
+    return {
+      statusCode: 500,
+      headers: makeCORSHeaders(),
+      body: JSON.stringify({ error: error.message || "Internal Server Error" })
+    };
   }
 }
 
 async function handleVoices(url) {
+  const localeFilter = (url.searchParams.get("l") || "").toLowerCase();
+  const format = url.searchParams.get("f");
+  
   try {
-    const localeFilter = (url.searchParams.get("l") || "").toLowerCase();
-    const format = url.searchParams.get("f");
-    
     let voices = await voiceList();
-    
     if (localeFilter) {
       voices = voices.filter(item => item.Locale.toLowerCase().includes(localeFilter));
     }
     
     if (format === "0") {
       const formattedVoices = voices.map(item => formatVoiceItem(item));
-      return new Response(formattedVoices.join("\n"), {
+      return {
+        statusCode: 200,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
           ...makeCORSHeaders()
-        }
-      });
+        },
+        body: formattedVoices.join("\n")
+      };
     } else if (format === "1") {
       const voiceMap = Object.fromEntries(voices.map(item => [item.ShortName, item.LocalName]));
-      return new Response(JSON.stringify(voiceMap), {
+      return {
+        statusCode: 200,
         headers: {
           "Content-Type": "application/json; charset=utf-8",
           ...makeCORSHeaders()
-        }
-      });
+        },
+        body: JSON.stringify(voiceMap)
+      };
     } else {
-      return new Response(JSON.stringify(voices), {
+      return {
+        statusCode: 200,
         headers: {
           "Content-Type": "application/json; charset=utf-8",
           ...makeCORSHeaders()
-        }
-      });
+        },
+        body: JSON.stringify(voices)
+      };
     }
   } catch (error) {
-    console.error("Voices Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        ...makeCORSHeaders()
-      }
-    });
+    return {
+      statusCode: 500,
+      headers: makeCORSHeaders(),
+      body: JSON.stringify({ error: error.message || "Failed to fetch voices" })
+    };
   }
 }
 
-function handleDefault(url) {
-  const baseUrl = `${url.protocol}//${url.host}`;
-  const htmlContent = `
-  <h1>内置 TTS API</h1>
+function getDefaultHTML(url) {
+  const baseUrl = `${url.protocol}//${url.host}/api`;
+  return `
   <ol>
-    <li>/api/tts?t=[text]&v=[voice]&r=[rate]&p=[pitch]&o=[outputFormat] <a href="${baseUrl}/api/tts?t=hello, world&v=zh-CN-XiaoxiaoMultilingualNeural&r=0&p=0&o=audio-24khz-48kbitrate-mono-mp3">试试</a></li>
-    <li>/api/voices?l=[locale, 如 zh|zh-CN]&f=[format, 0/1/空 0(TTS-Server)|1(MultiTTS)] <a href="${baseUrl}/api/voices?l=zh&f=1">试试</a></li>
+      <li> /tts?t=[text]&v=[voice]&r=[rate]&p=[pitch]&o=[outputFormat] <a href="${baseUrl}/tts?t=hello, world&v=zh-CN-XiaoxiaoMultilingualNeural&r=0&p=0&o=audio-24khz-48kbitrate-mono-mp3">试试</a> </li>
+      <li> /voices?l=[locale, 如 zh|zh-CN]&f=[format, 0/1/空 0(TTS-Server)|1(MultiTTS)] <a href="${baseUrl}/voices?l=zh&f=1">试试</a> </li>
   </ol>
   `;
-  return new Response(htmlContent, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      ...makeCORSHeaders()
-    }
-  });
 }
 
 async function getVoice(text, voiceName, rate, pitch, outputFormat, download) {
   await refreshEndpoint();
-  const url = `https://${endpoint.r}.tts.speech.microsoft.com/cognitiveservices/v1`;
+  
+  const ssml = generateSsml(text, voiceName, rate, pitch);
+  const url = endpoint.ttsUrl;
+  
   const headers = {
-    "Authorization": endpoint.t,
+    "Authorization": `Bearer ${endpoint.t}`,
     "Content-Type": "application/ssml+xml",
     "X-Microsoft-OutputFormat": outputFormat,
-    "User-Agent": "okhttp/4.5.0"
+    "User-Agent": "edgeTTS4R",
+    "Origin": "https://azure.microsoft.com",
+    "Referer": "https://azure.microsoft.com/",
+    "X-ClientTraceId": clientId
   };
-
-  const ssml = generateSsml(text, voiceName, rate, pitch);
+  
+  if (download) {
+    headers["Content-Disposition"] = `attachment; filename="${voiceName}.mp3"`;
+  }
+  
   const response = await fetch(url, {
     method: "POST",
-    headers,
-    body: ssml
+    headers: headers,
+    body: encoder.encode(ssml)
   });
-
+  
   if (!response.ok) {
-    throw new Error(`TTS 请求失败，状态码 ${response.status}`);
+    throw new Error(`获取语音失败，状态码 ${response.status}`);
   }
-
-  const newResponse = new Response(response.body, response);
-  if (download) {
-    newResponse.headers.set("Content-Disposition", `attachment; filename="${uuid()}.mp3"`);
-  }
-  return newResponse;
+  
+  const buffer = await response.arrayBuffer();
+  return { 
+    base64: Buffer.from(buffer).toString('base64')
+  };
 }
 
 function generateSsml(text, voiceName, rate, pitch) {
   return `<speak xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" version="1.0" xml:lang="zh-CN"> 
-            <voice name="${voiceName}"> 
-              <mstts:express-as style="general" styledegree="1.0" role="default"> 
-                <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${text}</prosody> 
-              </mstts:express-as> 
-            </voice> 
+              <voice name="${voiceName}"> 
+                  <mstts:express-as style="general" styledegree="1.0" role="default"> 
+                      <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${text}</prosody> 
+                  </mstts:express-as> 
+              </voice> 
           </speak>`;
 }
 
@@ -211,19 +254,11 @@ async function voiceList() {
   return await response.json();
 }
 
-function addCORSHeaders(response) {
-  const newHeaders = new Headers(response.headers);
-  Object.entries(makeCORSHeaders()).forEach(([key, value]) => {
-    newHeaders.set(key, value);
-  });
-  return new Response(response.body, { ...response, headers: newHeaders });
-}
-
 function makeCORSHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, x-auth-token",
     "Access-Control-Max-Age": "86400"
   };
 }
@@ -231,7 +266,7 @@ function makeCORSHeaders() {
 async function refreshEndpoint() {
   if (!expiredAt || Date.now() / 1000 > expiredAt - 60) {
     endpoint = await getEndpoint();
-    const decodedJwt = JSON.parse(atob(endpoint.t.split(".")[1]));
+    const decodedJwt = JSON.parse(Buffer.from(endpoint.t.split(".")[1], "base64").toString());
     expiredAt = decodedJwt.exp;
     clientId = uuid();
     console.log(`获取 Endpoint, 过期时间剩余: ${((expiredAt - Date.now() / 1000) / 60).toFixed(2)} 分钟`);
@@ -285,34 +320,20 @@ function formatDate() {
 }
 
 async function hmacSha256(key, data) {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    key,
-    { name: "HMAC", hash: { name: "SHA-256" } },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
-  return new Uint8Array(signature);
+  const crypto = require('crypto');
+  const hmac = crypto.createHmac('sha256', Buffer.from(key));
+  hmac.update(data);
+  return Buffer.from(hmac.digest());
 }
 
 async function base64ToBytes(base64) {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
+  return Buffer.from(base64, 'base64');
 }
 
 async function bytesToBase64(bytes) {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+  return Buffer.from(bytes).toString('base64');
 }
 
 function uuid() {
-  return crypto.randomUUID().replace(/-/g, "");
+  return require('crypto').randomUUID().replace(/-/g, "");
 }

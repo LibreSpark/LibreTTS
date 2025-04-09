@@ -6,14 +6,13 @@ let isGenerating = false;
 
 const API_CONFIG = {
     'workers-api': {
+        // Changed to use local API endpoint instead of external worker
         url: '/api/tts'
-        // Removed authToken - internal API integration doesn't need authentication
     },
     'deno-api': {
         url: 'https://deno-tts.api.zwei.de.eu.org/tts'
     },
     'oai-tts': {
-        // 使用代理服务而不是直接访问
         url: 'https://oai-tts.zwei.de.eu.org/v1/audio/speech'
     }
 };
@@ -295,8 +294,6 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
             'Content-Type': 'application/json'
         };
         
-        // Removed API key validation logic since we don't need authentication anymore
-
         // 使用传入的speakerId（如果有）或者当前选择的speakerId
         const voice = speakerId || $('#speaker').val();
         
@@ -340,8 +337,6 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
             headers: headers,
             body: JSON.stringify(requestBody)
         });
-
-        // Removed 401 error handling since we don't need authentication anymore
 
         if (!response.ok) {
             console.error('服务器响应错误:', response.status, response.statusText);
