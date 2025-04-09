@@ -3,7 +3,15 @@
     "include": ["/*"],
     "exclude": [],
     "routes": [
-      { "pattern": "/api/tts", "function": "api/tts" },
-      { "pattern": "/api/voices", "function": "api/tts" }
+      { 
+        "pattern": "/api/tts", 
+        "function": "api/tts",
+        "methods": ["GET", "POST", "OPTIONS"]
+      },
+      { 
+        "pattern": "/api/voices", 
+        "function": "api/tts",
+        "methods": ["GET", "OPTIONS"] 
+      }
     ]
-  }
+}
