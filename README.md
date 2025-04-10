@@ -14,6 +14,16 @@ Ciallo TTS 是一款免费的在线文本转语音工具，支持多种声音选
 
 ## 部署指南
 
+### Vercel 部署
+
+1. Fork 本仓库到你的 GitHub 账号
+
+2. 登录 [Vercel](https://vercel.com/)，点击 "New Project"
+
+3. 导入你 fork 的仓库，并选择默认设置部署即可
+
+4. 部署完成后，你会获得一个 `your-project.vercel.app` 的域名
+
 ### Cloudflare Pages 部署
 
 1. Fork 本仓库到你的 GitHub 账号
@@ -33,8 +43,11 @@ Ciallo TTS 是一款免费的在线文本转语音工具，支持多种声音选
 
 ```
 .
-├── index.html # 主页面
-├── style.css # 样式文件
-├── script.js # 主要逻辑
-└── speakers.json # 讲述人配置
+├── index.html    # 主页面
+├── style.css     # 样式文件
+├── script.js     # 主要逻辑
+├── speakers.json # 讲述人配置
+└── api/          # API 端点
+    ├── tts.js    # TTS API
+    └── voices.js # 语音列表 API
 ```
