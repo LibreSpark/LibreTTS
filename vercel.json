@@ -1,15 +1,13 @@
 {
   "version": 2,
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/tts",
-      "methods": ["GET", "POST", "OPTIONS"],
-      "dest": "/api/tts.js"
+      "source": "/api/tts",
+      "destination": "/api/tts.js"
     },
     {
-      "src": "/api/voices",
-      "methods": ["GET", "OPTIONS"],
-      "dest": "/api/voices.js"
+      "source": "/api/voices",
+      "destination": "/api/voices.js"
     }
   ],
   "headers": [
