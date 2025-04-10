@@ -5,12 +5,8 @@ let requestCounter = 0;
 let isGenerating = false;
 
 const API_CONFIG = {
-    'workers-api': {
-        // Changed to use local API endpoint instead of external worker
+    'edge-api': {
         url: '/api/tts'
-    },
-    'deno-api': {
-        url: 'https://deno-tts.api.zwei.de.eu.org/tts'
     },
     'oai-tts': {
         url: 'https://oai-tts.zwei.de.eu.org/v1/audio/speech'
@@ -24,7 +20,7 @@ function loadSpeakers() {
         dataType: 'json',
         success: function(data) {
             apiConfig = data;
-            updateSpeakerOptions('workers-api');
+            updateSpeakerOptions('edge-api');
         },
         error: function(jqXHR, textStatus, errorThrown) {
             console.error(`加载讲述者失败：${textStatus} - ${errorThrown}`);
@@ -54,12 +50,12 @@ function updateSliderLabel(sliderId, labelId) {
 }
 
 $(document).ready(function() {
-    // 确保默认API选择为workers-api
+    // 确保默认API选择为edge-api
     if ($('#api').length && !$('#api').val()) {
-        $('#api').val('workers-api');
+        $('#api').val('edge-api');
     }
     loadSpeakers().then(() => {
-        $('#apiTips').text('使用 Workers API，每天限制 100000 次请求');
+        $('#apiTips').text('使用 Edge API，每天限制 100000 次请求');
         
         // 初始化音频播放器
         initializeAudioPlayer();
@@ -76,8 +72,7 @@ $(document).ready(function() {
             
             // 根据选择的API更新提示信息
             const tips = {
-                'workers-api': 'Workers API 每天限制 100000 次请求',
-                'deno-api': 'Deno API，基于 Lobe-TTS，暂不支持语速语调调整',
+                'edge-api': 'Edge API 每天限制 100000 次请求',
                 'oai-tts': 'OpenAI-TTS 支持情感调整，不支持停顿标签'
             };
             $('#apiTips').text(tips[apiName] || '');
@@ -88,11 +83,6 @@ $(document).ready(function() {
                 $('#formatContainer').show();
                 $('#rateContainer, #pitchContainer').hide();
                 $('#pauseControls').hide(); // 隐藏停顿控制
-            } else if (apiName === 'deno-api') {
-                $('#instructionsContainer').hide();
-                $('#formatContainer').hide();
-                $('#rateContainer, #pitchContainer').hide(); // 隐藏语速语调控制
-                $('#pauseControls').show(); // 显示停顿控制
             } else {
                 $('#instructionsContainer').hide();
                 $('#formatContainer').hide();
@@ -182,7 +172,7 @@ async function generateVoice(isPreview) {
     if (isPreview) {
         const previewText = text.substring(0, 20);
         try {
-            const blob = await makeRequest(apiUrl, true, previewText, apiName === 'deno-api');
+            const blob = await makeRequest(apiUrl, true, previewText, false);
             if (blob) {
                 if (currentAudioURL) {
                     URL.revokeObjectURL(currentAudioURL);
@@ -233,7 +223,7 @@ async function generateVoice(isPreview) {
     } else {
         showLoading(`正在生成#${currentRequestId}请求的语音...`);
         const requestInfo = `#${currentRequestId}(1/1)`;
-        makeRequest(apiUrl, false, text, apiName === 'deno-api', requestInfo, currentSpeakerId)
+        makeRequest(apiUrl, false, text, false, requestInfo, currentSpeakerId)
             .then(blob => {
                 if (blob) {
                     const timestamp = new Date().toLocaleTimeString();
@@ -314,12 +304,6 @@ async function makeRequest(url, isPreview, text, isDenoApi, requestId = '', spea
             if (instructions) {
                 requestBody.instructions = instructions;
             }
-        } else if (apiName === 'deno-api') {
-            requestBody = {
-                text: text,
-                voice: voice,
-                preview: isPreview
-            };
         } else {
             requestBody = {
                 text: text,
@@ -769,7 +753,7 @@ async function generateVoiceForLongText(segments, currentRequestId, currentSpeak
                     apiUrl, 
                     false, 
                     segments[i], 
-                    apiName === 'deno-api', 
+                    false,
                     `#${currentRequestId}(${i + 1}/${totalSegments})`,
                     currentSpeakerId // 传递固定的讲述人ID
                 );
