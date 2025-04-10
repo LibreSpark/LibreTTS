@@ -295,6 +295,7 @@ async function makeRequest(url, isPreview, text, requestId = '', speakerId = nul
             const format = $('#audioFormat').val();
             
             requestBody = {
+                model: "tts-1", // 添加必要的model参数
                 input: text,
                 voice: voice,
                 response_format: format
@@ -304,6 +305,13 @@ async function makeRequest(url, isPreview, text, requestId = '', speakerId = nul
             if (instructions) {
                 requestBody.instructions = instructions;
             }
+            
+            // 记录OAI-TTS请求详情以便调试
+            console.log('OAI-TTS请求详情:', {
+                isPreview,
+                requestBody,
+                url
+            });
         } else {
             requestBody = {
                 text: text,
@@ -323,8 +331,10 @@ async function makeRequest(url, isPreview, text, requestId = '', speakerId = nul
         });
 
         if (!response.ok) {
-            console.error('服务器响应错误:', response.status, response.statusText);
-            throw new Error(`服务器响应错误: ${response.status}`);
+            // 增强错误信息，尝试获取响应内容
+            const errorText = await response.text().catch(() => '');
+            console.error('服务器响应错误:', response.status, response.statusText, errorText);
+            throw new Error(`服务器响应错误: ${response.status} - ${errorText || response.statusText}`);
         }
 
         const blob = await response.blob();
