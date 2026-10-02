@@ -49,11 +49,17 @@ function jsonEscape(value: string): string {
 /**
  * 渲染模板字符串。
  * @param opts.json 为 true 时占位符按 JSON 字符串规则转义（用于拼接 JSON body）
+ * @param opts.url  为 true 时占位符按 URL 组件编码（用于查询串，防止 & / # 注入额外参数）
  */
-export function renderTemplate(tpl: string, vars: TemplateVars, opts: { json?: boolean } = {}): string {
+export function renderTemplate(
+  tpl: string,
+  vars: TemplateVars,
+  opts: { json?: boolean; url?: boolean } = {}
+): string {
   const map = toPlaceholderMap(vars);
   return tpl.replace(PLACEHOLDER_RE, (_match, name: string) => {
     const raw = map[name.trim()] ?? "";
+    if (opts.url) return encodeURIComponent(raw);
     return opts.json ? jsonEscape(raw) : raw;
   });
 }

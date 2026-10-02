@@ -1,7 +1,7 @@
 // 纯函数单元测试：node --test tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getApiLimits, getPreviewText, getTextLength, splitText, escapeXml } from "../src/lib/segmentation.ts";
+import { getApiLimits, getPreviewText, getTextLength, splitText, truncateToUnits, escapeXml } from "../src/lib/segmentation.ts";
 import { formatToExtension, escapeXml as serverEscapeXml, generateSsml } from "../src/lib/edgeTts.ts";
 
 // ---------- getTextLength ----------
@@ -166,4 +166,35 @@ test("getPreviewText: 截断点正好落在标签中间时扩展到标签结束"
 test("getPreviewText: 标签不计入字符数", () => {
   const text = '<break time="2s"/>一二三四五';
   assert.equal(getPreviewText(text, 5), '<break time="2s"/>一二三四五');
+});
+
+// ---------- truncateToUnits（关闭自动分段时的处理） ----------
+test("truncateToUnits: 未超上限原样返回", () => {
+  assert.equal(truncateToUnits("你好", 10), "你好");
+});
+
+test("truncateToUnits: 超上限按单位数截断", () => {
+  // 中文 2 单位，10 单位即 5 个字
+  assert.equal(truncateToUnits("一二三四五六七", 10), "一二三四五");
+});
+
+test("truncateToUnits: 放不下的停顿标签整体丢弃", () => {
+  const text = '短句<break time="3s"/>长尾内容';
+  // "短句"=4 单位，标签=33 单位，预算 10 装不下标签 → 只留前缀，且不残留残缺标签
+  const cut = truncateToUnits(text, 10);
+  assert.equal(cut, "短句");
+  assert.ok(!cut.includes("<break"), "出现残缺标签: " + cut);
+});
+
+test("truncateToUnits: 极小预算不会卡死", () => {
+  assert.equal(truncateToUnits("一二三", 0), "");
+  assert.equal(truncateToUnits("一二三", 1), "");
+  assert.equal(truncateToUnits("一二三", 2), "一");
+});
+
+// ---------- splitText 终止性 ----------
+test("splitText: 退化上限不会死循环", () => {
+  const segments = splitText("你好世界", 1);
+  assert.ok(segments.join("").includes("你"));
+  segments.forEach((s) => assert.ok(s.length > 0, "产生空段会原地打转"));
 });

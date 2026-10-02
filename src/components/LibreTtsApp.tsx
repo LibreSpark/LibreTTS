@@ -8,7 +8,7 @@ import HistoryCard from "./HistoryCard";
 import ApiManagerModal from "./ApiManagerModal";
 import PasswordGate from "./PasswordGate";
 import { ToastProvider, useToast } from "./ToastProvider";
-import { getPreviewText, getTextLength, resolveApiLimits, splitText } from "@/lib/segmentation";
+import { getPreviewText, getTextLength, resolveApiLimits, splitText, truncateToUnits } from "@/lib/segmentation";
 import { mergeAudioBlobs } from "@/lib/audioBlob";
 import {
   audioExtension,
@@ -127,7 +127,8 @@ function LibreTtsAppInner() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const requestCounter = useRef(0);
   const [generating, setGenerating] = useState(false);
-  const cachedAudio = useRef(new Map<string, Blob>());
+  // Object URL 不会被垃圾回收，主播放器换源时必须显式释放上一份，否则每播放一次就泄漏一份音频
+  const currentResult = useRef<{ url: string; filename: string } | null>(null);
 
   const currentApi = useMemo(() => {
     const custom = customApis[apiId];
@@ -159,6 +160,8 @@ function LibreTtsAppInner() {
     () => resolveApiLimits(apiFormat, currentApi?.maxLength),
     [apiFormat, currentApi?.maxLength]
   );
+  // 内置 API 不在 customApis 中，未显式关闭即视为启用
+  const segmentationEnabled = customApis[apiId]?.enableSegmentation !== false;
 
   // 初始加载：内置讲述人 + localStorage 自定义 API
   useEffect(() => {
@@ -353,7 +356,6 @@ function LibreTtsAppInner() {
   const addHistoryItem = useCallback(
     (label: string, speaker: string, rawText: string, blob: Blob, requestInfo: string) => {
       const url = URL.createObjectURL(blob);
-      cachedAudio.current.set(url, blob);
       const item: HistoryItem = {
         id: Date.now() + Math.random(),
         label,
@@ -369,10 +371,7 @@ function LibreTtsAppInner() {
         // 超出上限时移除最旧条目并释放其 URL
         while (next.length > MAX_HISTORY) {
           const removed = next.pop();
-          if (removed) {
-            URL.revokeObjectURL(removed.audioUrl);
-            cachedAudio.current.delete(removed.audioUrl);
-          }
+          if (removed) URL.revokeObjectURL(removed.audioUrl);
         }
         return next;
       });
@@ -383,10 +382,7 @@ function LibreTtsAppInner() {
 
   const clearHistory = useCallback(() => {
     setHistory((prev) => {
-      prev.forEach((item) => {
-        URL.revokeObjectURL(item.audioUrl);
-        cachedAudio.current.delete(item.audioUrl);
-      });
+      prev.forEach((item) => URL.revokeObjectURL(item.audioUrl));
       return [];
     });
     setPlayingId(null);
@@ -394,20 +390,27 @@ function LibreTtsAppInner() {
   }, [show]);
 
   // ---------- 播放与下载 ----------
+  /** 主播放器与下载链接换源，同时释放被替换掉的旧 Object URL */
+  const applyResult = useCallback((next: { url: string; filename: string }) => {
+    const prev = currentResult.current;
+    if (prev && prev.url !== next.url) URL.revokeObjectURL(prev.url);
+    currentResult.current = next;
+    setResult(next);
+  }, []);
+
   const playAudio = useCallback(
     (blob: Blob, itemId: number) => {
       const audio = audioRef.current;
       if (!audio) return;
       const url = URL.createObjectURL(blob);
-      cachedAudio.current.set(url, blob);
       audio.src = url;
       audio.play().catch(() => {});
       setPlayingId(itemId);
       audio.onended = () => setPlayingId(null);
-      // 回填主播放器与下载链接（与旧版行为一致）
-      setResult((prev) => ({ url, filename: prev?.filename ?? "voice.mp3" }));
+      // 回填主播放器与下载链接（沿用当前文件名）
+      applyResult({ url, filename: currentResult.current?.filename ?? "voice.mp3" });
     },
-    []
+    [applyResult]
   );
 
   const downloadBlob = useCallback((blob: Blob, filename: string) => {
@@ -466,8 +469,7 @@ function LibreTtsAppInner() {
           const previewText = getPreviewText(rawText, 20);
           const blob = await requestSegment(previewText, true);
           const url = URL.createObjectURL(blob);
-          cachedAudio.current.set(url, blob);
-          setResult({ url, filename: `voice.${audioExtension(api, audioFormat)}` });
+          applyResult({ url, filename: `voice.${audioExtension(api, audioFormat)}` });
           return;
         }
 
@@ -475,7 +477,12 @@ function LibreTtsAppInner() {
         requestCounter.current += 1;
         const requestId = requestCounter.current;
 
-        const segments = splitText(rawText, limits.maxSegment);
+        const segments = segmentationEnabled
+          ? splitText(rawText, limits.maxSegment)
+          : [truncateToUnits(rawText, limits.maxTotal)];
+        if (!segmentationEnabled && segments[0] !== rawText) {
+          show(`已关闭自动分段，文本超出 ${limits.maxTotal} 单位上限，超出部分已丢弃`, "warning");
+        }
         const results: Blob[] = [];
 
         if (segments.length > 1) {
@@ -536,9 +543,8 @@ function LibreTtsAppInner() {
             addHistoryItem(`${requestId}(合并)`, speakerName, rawText, finalBlob, `共 ${segments.length} 段`);
           }
           const url = URL.createObjectURL(finalBlob);
-          cachedAudio.current.set(url, finalBlob);
           // 音频元素通过 result 状态渲染（src + autoPlay），无需直接操作 DOM
-          setResult({ url, filename: `voice.${audioExtension(api, audioFormat)}` });
+          applyResult({ url, filename: `voice.${audioExtension(api, audioFormat)}` });
         }
       } catch (err) {
         show(err instanceof Error ? err.message : "生成失败", "danger");
@@ -559,9 +565,14 @@ function LibreTtsAppInner() {
       edgeStyle,
       edgeRole,
       edgeVolume,
-      limits.maxSegment,
+      limits,
+      segmentationEnabled,
+      applyResult,
       show,
+      showProgress,
+      hideProgress,
       addHistoryItem,
+      generating,
     ]
   );
 

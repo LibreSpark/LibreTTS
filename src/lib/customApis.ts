@@ -59,7 +59,11 @@ export async function fetchCustomSpeakers(api: CustomApi): Promise<SpeakerMap> {
     headers["Authorization"] = `Bearer ${api.apiKey}`;
   }
 
-  const response = await fetch(api.modelEndpoint, { method: "GET", headers });
+  const response = await fetch(api.modelEndpoint, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(15000),
+  });
   if (!response.ok) {
     throw new Error(`获取讲述者失败: ${response.status}`);
   }
@@ -97,7 +101,11 @@ export async function fetchModelList(api: {
   if (api.apiKey) {
     headers["Authorization"] = `Bearer ${api.apiKey}`;
   }
-  const response = await fetch(api.modelEndpoint, { method: "GET", headers });
+  const response = await fetch(api.modelEndpoint, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(15000),
+  });
   if (!response.ok) {
     throw new Error(`获取模型失败: ${response.status}`);
   }

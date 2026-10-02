@@ -7,6 +7,9 @@ let endpoint: { t: string; r: string } | null = null;
 let refreshPromise: Promise<void> | null = null;
 let clientId = "76a75279-2ffa-4c3d-8db8-7b47252aa41c";
 
+/** 上游请求超时。此前所有 fetch 都没有 timeout，微软端点挂起会让请求永久占住连接 */
+const UPSTREAM_TIMEOUT_MS = 30000;
+
 /** 默认输出格式（24kHz 48kbps mp3） */
 export const DEFAULT_OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3";
 
@@ -41,9 +44,24 @@ export function formatToExtension(format: string): string {
   if (f.includes("wav") || f.includes("riff")) return "wav";
   if (f.includes("truesilk")) return "silk";
   if (f.includes("amr-wb")) return "amr";
-  if (f.includes("webm")) return "webm";
   if (f.includes("pcm") || f.includes("raw")) return "pcm";
   return "mp3";
+}
+
+/** 音频格式 → MIME 类型。扩展名与 MIME 判断顺序不同：riff/raw 先于 opus 判断 */
+export function formatToMime(format: string): string {
+  const f = format.toLowerCase();
+  if (f.includes("riff") || f.includes("wav")) return "audio/wav";
+  if (f.includes("ogg")) return "audio/ogg";
+  if (f.includes("webm")) return "audio/webm";
+  if (f.includes("opus") && !f.includes("webm")) return "audio/opus";
+  if (f.includes("flac")) return "audio/flac";
+  // 裸 PCM 无容器头，声明为 L16 并带上采样率，交由客户端封装为 WAV
+  if (f.includes("pcm") || f.includes("raw")) {
+    const rate = /-(\d+)khz/.exec(f);
+    return `audio/L16;rate=${rate ? Number(rate[1]) * 1000 : 16000};channels=1`;
+  }
+  return "audio/mpeg";
 }
 
 export function escapeXml(str: unknown): string {
@@ -147,7 +165,11 @@ async function getEndpoint(): Promise<{ t: string; r: string }> {
     "Accept-Encoding": "gzip",
   };
 
-  const response = await fetch(endpointUrl, { method: "POST", headers });
+  const response = await fetch(endpointUrl, {
+    method: "POST",
+    headers,
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`获取 Endpoint 失败，状态码 ${response.status}`);
   }
@@ -226,6 +248,7 @@ export async function synthesize(
       "Referer": "https://azure.microsoft.com/",
     },
     body: ssml,
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
 
   if (!response.ok) {

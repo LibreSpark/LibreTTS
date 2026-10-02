@@ -52,6 +52,9 @@ export const EDGE_AUDIO_FORMATS = ["mp3", "opus", "wav", "pcm"];
 /** OpenAI 风格 API 支持的音频格式 */
 export const OPENAI_AUDIO_FORMATS = ["mp3", "opus", "aac", "flac", "wav", "pcm"];
 
+/** 客户端请求超时。此前出站 fetch 全无 timeout，第三方端点挂起会让"生成"按钮永远转圈 */
+const REQUEST_TIMEOUT_MS = 120000;
+
 /** 按 API 格式返回可选的音频格式列表 */
 export function supportedAudioFormats(format: ApiFormat): string[] {
   return format === "edge" ? EDGE_AUDIO_FORMATS : OPENAI_AUDIO_FORMATS;
@@ -125,8 +128,9 @@ export async function makeTtsRequest(ctx: ApiContext, opts: TtsRequestOptions): 
 
     let body: string | undefined;
     if (method === "GET") {
+      // url 模式：占位符按查询组件编码，界面对该字段的说明正是"会自动 URL 编码"
       const query = tpl.query
-        ? renderTemplate(tpl.query, vars)
+        ? renderTemplate(tpl.query, vars, { url: true })
         : `text=${encodeURIComponent(opts.text)}&voice=${encodeURIComponent(opts.voice)}`;
       url += (url.includes("?") ? "&" : "?") + query;
     } else {
@@ -147,7 +151,7 @@ export async function makeTtsRequest(ctx: ApiContext, opts: TtsRequestOptions): 
       headers["Authorization"] = `Bearer ${ctx.apiKey}`;
     }
 
-    const response = await fetch(url, { method, headers, body });
+    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (!response.ok) await readError(response);
 
     if (tpl.responseType === "json") {
@@ -157,7 +161,7 @@ export async function makeTtsRequest(ctx: ApiContext, opts: TtsRequestOptions): 
         throw new Error(`响应中未找到音频字段: ${tpl.responsePath || "(根)"}`);
       }
       if (tpl.responseEncoding === "url") {
-        const audioRes = await fetch(value);
+        const audioRes = await fetch(value, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
         if (!audioRes.ok) await readError(audioRes);
         return ensurePlayableAudio(
           toAudioBlob(await audioRes.blob(), audioRes.headers.get("content-type")),
@@ -238,6 +242,7 @@ export async function makeTtsRequest(ctx: ApiContext, opts: TtsRequestOptions): 
     method: "POST",
     headers,
     body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) await readError(response);

@@ -17,6 +17,29 @@ function check(name, cond, detail = "") {
   }
 }
 
+/** 解析 RIFF/WAVE 的 data 块，返回 16bit PCM 的 RMS；非 WAV 或缺 data 块返回 -1。
+ *  状态码 200 且字节非空并不保证有声音，静音流的长度与正常音频完全一致。 */
+function wavRms(buf) {
+  const v = new DataView(buf);
+  const tag = (o) => String.fromCharCode(v.getUint8(o), v.getUint8(o + 1), v.getUint8(o + 2), v.getUint8(o + 3));
+  if (buf.byteLength < 12 || tag(0) !== "RIFF" || tag(8) !== "WAVE") return -1;
+  let off = 12;
+  while (off + 8 <= buf.byteLength) {
+    const size = v.getUint32(off + 4, true);
+    if (tag(off) === "data") {
+      const n = Math.floor(Math.min(size, buf.byteLength - off - 8) / 2);
+      let sum = 0;
+      for (let i = 0; i < n; i++) {
+        const s = v.getInt16(off + 8 + i * 2, true);
+        sum += s * s;
+      }
+      return n ? Math.sqrt(sum / n) : 0;
+    }
+    off += 8 + size + (size % 2);
+  }
+  return -1;
+}
+
 async function main() {
   console.log(`测试目标: ${BASE}\n`);
 
@@ -29,9 +52,20 @@ async function main() {
       body: JSON.stringify({ text: "测试文本", voice: "zh-CN-XiaoxiaoNeural" }),
     });
     check("POST 正常返回 audio/mpeg", r1.status === 200 && r1.headers.get("content-type") === "audio/mpeg");
-    check("POST 响应带 CORS 头", r1.headers.get("access-control-allow-origin") === "*");
     const buf1 = await r1.arrayBuffer();
     check("POST 返回非空音频", buf1.byteLength > 1000);
+
+    // 默认不开放跨域：未列入 CORS_ALLOWED_ORIGINS 的来源一律不给 ACAO 头
+    const rCors = await fetch(`${BASE}/api/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+      body: JSON.stringify({ text: "跨域", voice: "zh-CN-XiaoxiaoNeural" }),
+    });
+    await rCors.arrayBuffer();
+    check(
+      "未白名单来源不返回 Access-Control-Allow-Origin",
+      rCors.headers.get("access-control-allow-origin") === null
+    );
 
     // GET 下载
     const r2 = await fetch(`${BASE}/api/tts?t=下载测试&d=true`);
@@ -39,13 +73,63 @@ async function main() {
     check("GET 下载文件名按格式映射 .mp3", (r2.headers.get("content-disposition") || "").includes(".mp3"));
     await r2.arrayBuffer();
 
-    // 缺少文本 → 上游报错应返回 500 JSON 而非崩溃
+    // GET 缺省音量：曾因 Number(null)===0 把缺参当成音量 0，返回等长纯静音
+    const r2w = await fetch(`${BASE}/api/tts?t=${encodeURIComponent("音量默认测试文本")}&o=wav`);
+    const rmsDefault = wavRms(await r2w.arrayBuffer());
+    check("GET 缺省音量返回非静音音频", rmsDefault > 100, `rms=${rmsDefault}`);
+
+    // 显式 vol=0 仍是零音量，避免有人把缺省修复成"0 抬到默认值"
+    const r2z = await fetch(`${BASE}/api/tts?t=${encodeURIComponent("音量默认测试文本")}&o=wav&vol=0`);
+    const rmsZero = wavRms(await r2z.arrayBuffer());
+    check("显式 vol=0 保持零音量", rmsZero >= 0 && rmsZero < 5, `rms=${rmsZero}`);
+
+    // X-TTS-Text：原文不必进 URL（URL 会落进 nginx/CDN 日志与浏览器历史）。
+    // HTTP 头只能带 latin1 字节，所以值必须像 query 一样先百分号编码。
+    const r2h = await fetch(`${BASE}/api/tts?o=wav`, {
+      headers: { "X-TTS-Text": encodeURIComponent("请求头文本测试") },
+    });
+    check("GET 可用 X-TTS-Text 请求头传文本", r2h.status === 200, `status=${r2h.status}`);
+    const rmsHeader = wavRms(await r2h.arrayBuffer());
+    check("请求头文本解码后正常合成（非静音）", rmsHeader > 100, `rms=${rmsHeader}`);
+
+    const r2p = await fetch(`${BASE}/api/tts?t=${encodeURIComponent("应被忽略")}`, {
+      headers: { "X-TTS-Text": encodeURIComponent("请求头优先") },
+    });
+    check("请求头文本优先于 query", r2p.status === 200);
+    await r2p.arrayBuffer();
+
+    // 裸 % 不是合法转义序列时按原文处理，不能整请求失败
+    const r2raw = await fetch(`${BASE}/api/tts`, { headers: { "X-TTS-Text": "50% off deal" } });
+    check("非法转义序列回落为原文", r2raw.status === 200, `status=${r2raw.status}`);
+    await r2raw.arrayBuffer();
+
+    // 超长投递直接拒绝，挡住把本站当免费 TTS 后端的批量调用。
+    // GET 用 ASCII 填充：中文百分号编码后的 URL 会先撞上 Node 约 16KB 的请求行上限（431），那是另一层限制
+    const rLong = await fetch(`${BASE}/api/tts?t=${"a".repeat(10001)}`);
+    check("GET 超出文本上限返回 413", rLong.status === 413, `status=${rLong.status}`);
+    check("413 响应不含音频", !(rLong.headers.get("content-type") || "").includes("audio"));
+    await rLong.json().catch(() => ({}));
+
+    const rLongPost = await fetch(`${BASE}/api/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "长".repeat(6000) }),
+    });
+    check("POST 超出文本上限返回 413 JSON", rLongPost.status === 413, `status=${rLongPost.status}`);
+    await rLongPost.json().catch(() => ({}));
+
+    // 输出格式与 Content-Type 必须一致，此前恒为 audio/mpeg
+    const r2wav = await fetch(`${BASE}/api/tts?t=格式头测试&o=wav`);
+    check("wav 输出声明 audio/wav", r2wav.headers.get("content-type") === "audio/wav");
+    await r2wav.arrayBuffer();
+
+    // 空文本本地拒绝（400），不再把空 SSML 抛给上游
     const r3 = await fetch(`${BASE}/api/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: "" }),
     });
-    check("空文本返回 5xx JSON 错误", r3.status >= 400 && (r3.headers.get("content-type") || "").includes("json"));
+    check("空文本返回 4xx JSON 错误", r3.status >= 400 && r3.status < 500 && (r3.headers.get("content-type") || "").includes("json"));
     const e3 = await r3.json();
     check("错误响应含 error 字段", typeof e3.error === "string");
 
@@ -55,8 +139,12 @@ async function main() {
     await r4.arrayBuffer();
 
     // OPTIONS 预检
-    const r5 = await fetch(`${BASE}/api/tts`, { method: "OPTIONS" });
-    check("OPTIONS 返回 204 且带 CORS 头", r5.status === 204 && r5.headers.get("access-control-allow-origin") === "*");
+    const r5 = await fetch(`${BASE}/api/tts`, {
+      method: "OPTIONS",
+      headers: { Origin: "https://evil.example" },
+    });
+    check("OPTIONS 返回 204", r5.status === 204);
+    check("预检不授予未白名单来源", r5.headers.get("access-control-allow-origin") === null);
     await r5.arrayBuffer();
   }
 

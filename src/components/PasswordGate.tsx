@@ -1,14 +1,9 @@
 "use client";
 
-// 密码验证弹窗：页面加载时检查是否需要密码，验证通过后放行
+// 密码验证弹窗：页面加载时询问服务端是否需要密码，验证通过后由浏览器持有 HttpOnly 会话 cookie。
+// 授权状态一律以服务端为准——localStorage 标记可被访问者自行改写，不能当作访问控制。
 import { useEffect, useState } from "react";
 import { useToast } from "./ToastProvider";
-
-const AUTH_KEY = "authenticated";
-
-export function isAuthenticated(): boolean {
-  return localStorage.getItem(AUTH_KEY) === "true";
-}
 
 export default function PasswordGate({ children }: { children: React.ReactNode }) {
   const [showModal, setShowModal] = useState(false);
@@ -19,10 +14,8 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
   useEffect(() => {
     fetch("/api/check-password")
       .then((res) => res.json())
-      .then((data) => {
-        if (data.requirePassword && !isAuthenticated()) {
-          setShowModal(true);
-        }
+      .then((data: { requirePassword?: boolean; authenticated?: boolean }) => {
+        if (data.requirePassword && !data.authenticated) setShowModal(true);
       })
       .catch((err) => console.error("检查密码需求失败", err));
   }, []);
@@ -36,8 +29,8 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
       });
       const result = await res.json();
       if (res.status === 200 && result.valid) {
-        localStorage.setItem(AUTH_KEY, "true");
         setShowModal(false);
+        setError("");
         show("验证通过", "success");
       } else {
         setError(result.message || result.error || "密码错误");

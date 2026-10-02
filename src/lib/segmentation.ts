@@ -25,8 +25,10 @@ export function getApiLimits(format: ApiFormat): ApiLimits {
  */
 export function resolveApiLimits(format: ApiFormat, maxLength?: number | null): ApiLimits {
   const base = getApiLimits(format);
-  if (maxLength && maxLength > 0) {
-    return { maxSegment: maxLength, maxTotal: maxLength * 5 };
+  if (maxLength && Number.isFinite(maxLength) && maxLength > 0) {
+    // 单个 CJK 字符就占 2 单位，上限小于 2 时任何字符都放不下，splitText 会原地打转
+    const maxSegment = Math.max(2, Math.floor(maxLength));
+    return { maxSegment, maxTotal: maxSegment * 5 };
   }
   return base;
 }
@@ -135,12 +137,36 @@ export function splitText(text: string, maxSegment: number): string[] {
     if (bestSplitIndex > 0) {
       splitIndex = bestSplitIndex + 1;
     }
+    // 必须保证前进：splitIndex 为 0 时 remainingText 不会变短，会死循环并把空串无限追加
+    if (splitIndex <= 0) splitIndex = 1;
 
     segments.push(remainingText.substring(0, splitIndex));
     remainingText = remainingText.substring(splitIndex).trim();
   }
 
   return segments;
+}
+
+/**
+ * 按单位预算截断文本，用于关闭自动分段的场景。
+ * 计数规则与 getTextLength 一致；放不下的 <break/> 标签整体丢弃，避免留下残缺 SSML。
+ */
+export function truncateToUnits(text: string, maxUnits: number): string {
+  if (getTextLength(text) <= maxUnits) return text;
+  const tags = findTagRanges(text);
+  let units = 0;
+  let cut = 0;
+  let i = 0;
+  while (i < text.length) {
+    const tag = tags.find(([s]) => s === i);
+    const end = tag ? tag[1] : i + 1;
+    const cost = getTextLength(text.slice(i, end));
+    if (units + cost > maxUnits) break;
+    units += cost;
+    cut = end;
+    i = end;
+  }
+  return text.slice(0, cut).trim();
 }
 
 export function escapeXml(str: unknown): string {

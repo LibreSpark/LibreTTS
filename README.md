@@ -15,7 +15,7 @@ LibreTTS 是一款免费的在线文本转语音工具，支持多种声音选�
 - 💾 支持音频下载
 - 📝 历史记录功能（最多保存50条）
 - 🔌 支持添加自定义 TTS API（OpenAI / Edge / 通用请求模板三种格式，内置常见服务预设，可导入导出配置）
-- 🔐 可选访问密码保护（设置 `PASSWORD` 环境变量）
+- 🔐 可选访问密码保护（设置 `PASSWORD` 环境变量，服务端校验签名 HttpOnly cookie，直接访问 API 同样受保护）
 
 ## 本地开发
 
@@ -31,20 +31,34 @@ npm run build      # 生产构建
 npm start          # 运行生产版本
 ```
 
+### 校验与测试
+
+```bash
+npm run typecheck  # tsc --noEmit
+npm run lint       # ESLint（next/core-web-vitals）
+npm run test:unit  # 纯函数单元测试（分段、SSML、模板、音频合并）
+npm run test:api   # 端到端契约测试：自行启动/回收生产服务器，需先 npm run build
+npm test           # 以上全部
+```
+
+`test:unit` 依赖 Node 的 `--experimental-strip-types`，需要 Node.js 22.6+；`test:api` 会占用 3300 与 3310 端口，若端口上已有旧服务器会直接报错退出，避免测到遗留构建。契约测试除了校验状态码与响应头，还会解析 RIFF/WAVE 的 PCM 数据算 RMS——HTTP 200 加非空字节并不保证音频里真的有声音。
+
 ### 项目结构
 
 ```
 ├── src/
 │   ├── app/                  # Next.js App Router
-│   │   ├── api/              # Route Handlers：tts / voices / check-password / verify-password
+│   │   ├── api/              # Route Handlers：tts / voices / voice-meta / check-password / verify-password
 │   │   ├── layout.tsx        # SEO metadata、JSON-LD、统计脚本
 │   │   └── page.tsx
 │   ├── components/           # React 组件（表单、历史记录、API管理弹窗、搜索下拉框等）
-│   ├── lib/                  # 核心逻辑（Edge TTS 签名、文本分段、请求构造、自定义API存储）
-│   └── hooks/                # React hooks
+│   ├── lib/                  # 核心逻辑（Edge TTS 签名、会话鉴权、文本分段、请求构造、自定义API存储）
+│   ├── hooks/                # React hooks
+│   └── middleware.ts         # 服务端访问密码门（校验 HttpOnly 会话 cookie）
+├── tests/                    # 单元测试 + 端到端契约测试（api / auth）+ 测试服务器编排
 ├── public/                   # 静态资源（speakers.json、图标）
 ├── Dockerfile                # 多阶段构建（standalone 输出）
-└── .github/workflows/        # Docker 镜像自动发布到 GHCR
+└── .github/workflows/        # CI 质量门禁、Docker 镜像自动发布到 GHCR
 ```
 
 ## API 说明
@@ -54,14 +68,41 @@ npm start          # 运行生产版本
 ### Edge API 路径
 
 - `/api/tts` - 文本转语音 API
-  - 支持 GET/POST 方法
-  - GET 示例: `/api/tts?t=你好世界&v=zh-CN-XiaoxiaoNeural&r=0&p=0`
-  - POST 示例: 请求体为JSON格式 `{"text": "你好世界", "voice": "zh-CN-XiaoxiaoNeural", "rate": 0, "pitch": 0}`
-  - `format` 参数可指定音频格式（默认 `audio-24khz-48kbitrate-mono-mp3`）
-    - 兼容 UI 简写：`mp3` / `opus` / `wav` / `pcm`，也接受完整的 Microsoft 输出格式字符串
-  - `style` / `role` / `volume` 可选参数，映射到 SSML 的 `mstts:express-as` 与 `prosody`
-    - 示例: `{"text":"你好","voice":"zh-CN-XiaoxiaoNeural","style":"cheerful","role":"default","volume":80}`
-    - 界面会根据所选语音从 `/api/voice-meta` 拉取可用值并中文展示（风格=语气，角色=年龄/性别音色）；切换语音会自动清除不支持的取值
+  - **POST**：请求体为 JSON
+
+    ```json
+    {"text": "你好世界", "voice": "zh-CN-XiaoxiaoNeural", "rate": 0, "pitch": 0, "format": "mp3"}
+    ```
+
+  - **GET**：使用短参数名，注意音频格式是 `o` 而不是 `format`
+
+    ```
+    /api/tts?t=你好世界&v=zh-CN-XiaoxiaoNeural&r=0&p=0&o=mp3
+    ```
+
+  | POST 字段 | GET 参数 | 说明 | 默认值 |
+  | --- | --- | --- | --- |
+  | `text` | `t` | 待合成文本，单次上限 10000 单位（中文算 2 单位），超出返回 413 | 必填 |
+  | `voice` | `v` | 讲述人 ShortName | `zh-CN-XiaoxiaoMultilingualNeural` |
+  | `rate` | `r` | 语速百分比，取值 -100~100 | `0` |
+  | `pitch` | `p` | 语调百分比，取值 -100~100 | `0` |
+  | `format` | `o` | 音频格式，兼容 UI 简写 `mp3` / `opus` / `wav` / `pcm`，也接受完整的 Microsoft 格式串 | `audio-24khz-48kbitrate-mono-mp3` |
+  | `preview` | `d` | GET 传 `d=true` 时返回 `Content-Disposition: attachment` 触发下载 | 在线播放 |
+  | `style` | `style` | SSML `mstts:express-as` 风格 | 不指定 |
+  | `role` | `role` | SSML `mstts:express-as` 角色 | 不指定 |
+  | `volume` | `vol` | SSML `prosody volume`，取值 0~100。**不传该参数即用上游默认音量**，传 `0` 才是静音 | 上游默认 |
+
+  - 响应 `Content-Type` 按实际输出格式声明：mp3 → `audio/mpeg`、wav → `audio/wav`、opus → `audio/ogg`、裸 PCM → `audio/L16`。
+  - 界面会根据所选语音从 `/api/voice-meta` 拉取可用风格/角色并中文展示（风格=语气，角色=年龄/性别音色），切换语音时自动清除不支持的取值。
+  - **文本写进 URL 会落进 nginx / CDN 访问日志和浏览器历史**，隐私文本或超长文本可改用请求头传递。HTTP 头只能携带 latin1 字节，因此值必须先做百分号编码（与 URL 参数同一约定）：
+
+    ```bash
+    # "你好世界" 编码后为 %E4%BD%A0%E5%A5%BD%E4%B8%96%E7%95%8C
+    curl -H "X-TTS-Text: %E4%BD%A0%E5%A5%BD%E4%B8%96%E7%95%8C" \
+         "http://localhost:3000/api/tts?o=mp3" -o voice.mp3
+    ```
+
+    请求头优先于 `?t=`；两种写法都保留以兼容既有调用。GET 把文本放 URL 时，实际可用长度还受 Node 约 16KB 的请求行上限约束（超过会返回 431），需要更长的文本请用 POST 或请求头。
 
 - `/api/voices` - 获取可用语音列表 API
   - 仅支持 GET 方法
@@ -73,6 +114,17 @@ npm start          # 运行生产版本
   - 示例: `/api/voice-meta?voice=zh-CN-XiaoxiaoNeural`
   - 返回: `{"voice":"...","found":true,"styles":["cheerful",...],"roles":["Girl",...]}`
   - `found=false` 表示未识别该讲述人（如自定义 API 的讲述人），前端回退为手动输入
+
+### 跨域与访问控制
+
+- **默认不开放跨域**：只有出现在 `CORS_ALLOWED_ORIGINS` 中的来源才会拿到 `Access-Control-Allow-Origin`。本站前端是同源请求，不受影响。
+- 设置 `PASSWORD` 后，除 `/api/check-password` 与 `/api/verify-password` 外的所有 `/api/*` 都要求已验证的会话 cookie，未验证返回 `401`。页面本身仍可加载（由前端弹出密码框），因此**程序化调用需要先换取 cookie**：
+
+  ```bash
+  curl -c jar.txt -X POST http://localhost:3000/api/verify-password \
+       -H 'Content-Type: application/json' -d '{"password":"你的密码"}'
+  curl -b jar.txt 'http://localhost:3000/api/tts?t=hello&v=zh-CN-XiaoxiaoNeural' -o voice.mp3
+  ```
 
 ### 自定义 API
 
@@ -139,6 +191,7 @@ LibreTTS 支持添加自定义 API 端点，目前支持三种格式：
   - 模型列表端点：可选，用于获取可用模型
   - 手动输入讲述人列表：逗号分隔的讲述人列表
   - 最大文本长度：可选，限制单次请求的文本长度（前端计数与请求校验共用同一阈值）
+  - 长文本处理：默认开启，超出单段上限时自动分段合成再拼接；关闭后不拆分，超过总上限的部分被丢弃并在界面提示
 
 3. 点击"获取模型"按钮可自动填充可用讲述人列表
 4. 点击"保存"完成添加
@@ -193,6 +246,12 @@ services:
     environment:
       # 设置访问密码；留空则不启用验证
       - PASSWORD=${PASSWORD:-}
+      # 可选：固定会话签名密钥（不设置时从 PASSWORD 派生）
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      # 可选：HTTPS 下给 cookie 加 Secure
+      - COOKIE_SECURE=${COOKIE_SECURE:-}
+      # 可选：允许跨域调用 API 的来源，逗号分隔
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}
     restart: unless-stopped
 ```
 
@@ -230,7 +289,7 @@ export PASSWORD=你的密码
 npm start
 ```
 
-可用环境变量：`PORT`（默认 3000）、`HOSTNAME`（默认 0.0.0.0）、`PASSWORD`（可选）。
+可用环境变量见文末[环境变量](#环境变量)一节：`PORT`、`HOSTNAME`、`PASSWORD`，以及可选的 `SESSION_SECRET`、`COOKIE_SECURE`、`CORS_ALLOWED_ORIGINS`。
 
 如需开机自启，可配置 systemd 服务（`/etc/systemd/system/libretts.service`）：
 
@@ -265,21 +324,32 @@ server {
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
+> 注意：密码校验的限速按来源 IP 计数，务必转发 `X-Forwarded-For` / `X-Real-IP`。否则所有访客共用同一个计数桶，任何人名下 10 次输错密码会把所有人一起挡在门外。
+
 > 注意：TTS 接口会返回音频流，若 Nginx 开启了缓冲导致长文本合成变慢或中断，可在 `location` 中加入 `proxy_buffering off;`。
+
+> 注意：GET 方式的文本在 URL 里，会原样进入 nginx 的 `access_log`。转发给第三方或开启日志长期保存时，建议调用方改用 POST 请求体或 `X-TTS-Text` 请求头。
 
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
 | --- | --- | --- |
 | `PASSWORD` | 访问密码，非空时开启验证 | 空（不验证） |
+| `SESSION_SECRET` | 会话 cookie 的签名密钥。未设置时从 `PASSWORD` 派生，即**修改密码会让所有旧会话立即失效**；希望换密码但不踢人则显式设置一个固定值 | 空 |
+| `COOKIE_SECURE` | 设为 `true` 时给会话 cookie 加 `Secure`，只在 HTTPS 下发送。反向代理终止 TLS 时如需生效还要转发 `X-Forwarded-Proto` | 空 |
+| `CORS_ALLOWED_ORIGINS` | 允许跨域的来源白名单，逗号分隔（如 `https://a.example,https://b.example`）；填 `*` 表示放行任意来源 | 空（不开放跨域） |
 | `PORT` | 服务监听端口 | `3000` |
 | `HOSTNAME` | 服务监听地址 | `0.0.0.0` |
 
-设置 `PASSWORD` 后，用户第一次访问页面时会显示密码输入界面，输入正确后在该设备上后续访问将不再需要验证。
+设置 `PASSWORD` 后，用户首次访问页面会看到密码输入界面。验证通过后服务端下发 `HttpOnly` 的签名会话 cookie（有效期 7 天），浏览器脚本无法读写或自行改写它，同一浏览器后续访问不再需要重复输入；换设备或清除 cookie 需要重新验证。密码校验按来源限速：5 分钟内最多 10 次，超出返回 `429` 并带 `Retry-After`。
+
+注意 cookie 由服务端下发，因此**启用密码后本站 API 不再是匿名可调**，第三方集成需按上面的方式先换取 cookie。
 
 ### 关于 Cloudflare 部署
 

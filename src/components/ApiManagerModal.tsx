@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, FileDown, FileUp, LoaderCircle, Pencil, Sparkles, Trash2, X } from "lucide-react";
 import type { ApiFormat, CustomApi, TemplateConfig } from "@/lib/types";
-import { fetchModelList } from "@/lib/customApis";
+import { fetchModelList, parseImportFile } from "@/lib/customApis";
 import type { CustomApiMap } from "@/lib/customApis";
 import { API_PRESETS, type ApiPreset } from "@/lib/apiPresets";
 import SearchableSelect from "./SearchableSelect";
@@ -188,7 +188,7 @@ export default function ApiManagerModal({
       apiKey: form.apiKey.trim() || undefined,
       modelEndpoint: form.modelEndpoint.trim() || undefined,
       manual: manual.length ? manual : undefined,
-      maxLength: form.maxLength ? parseInt(form.maxLength) : null,
+      maxLength: Number(form.maxLength) > 0 ? Math.floor(Number(form.maxLength)) : null,
       enableSegmentation: form.enableSegmentation,
       model: form.model.trim() || undefined,
       extraParams,
@@ -268,12 +268,7 @@ export default function ApiManagerModal({
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(reader.result as string);
-        if (!data.apis || !Array.isArray(data.apis)) {
-          throw new Error("文件格式不正确：缺少 apis 数组");
-        }
-        const apis: CustomApi[] = data.apis.filter((a: CustomApi) => a && a.name && a.endpoint);
-        onImportApis(apis);
+        onImportApis(parseImportFile(reader.result as string));
       } catch (err) {
         show(err instanceof Error ? err.message : "导入失败", "danger");
       }

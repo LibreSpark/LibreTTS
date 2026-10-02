@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    # 上游 Edge TTS 偶发不可用，卡住的测试不能让 runner 白跑到默认 360 分钟
+    timeout-minutes: 20
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-quality
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # test:unit 依赖 Node 的 --experimental-strip-types，需要 22.6+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build
+        run: npm run build
+
+      # 端到端契约测试：自行拉起两台生产服务器（开放实例 + 密码门实例），
+      # 除了状态码与响应头，还会解析 WAV 的 PCM 算 RMS 确认音频真的有声音。
+      # 依赖可访问的 Microsoft Edge TTS 上游服务。
+      - name: API and auth contract tests
+        run: npm run test:api

@@ -37,8 +37,10 @@ export async function fetchEdgeVoices(): Promise<EdgeVoiceItem[]> {
         "Referer": "https://azure.microsoft.com",
       };
 
+      // 上游挂起会让 /api/voices 与 /api/voice-meta 一起卡死，这里必须有超时
       const response = await fetch("https://eastus.api.speech.microsoft.com/cognitiveservices/voices/list", {
         headers,
+        signal: AbortSignal.timeout(15000),
       });
 
       if (!response.ok) {
