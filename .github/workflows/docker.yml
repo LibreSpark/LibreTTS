@@ -73,8 +73,10 @@ jobs:
           # 按 ref + 平台隔离缓存 scope：不同 ref / 不同平台不再争抢同一份 GHA 缓存锁
           cache-from: type=gha,scope=${{ github.ref_name }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-${{ matrix.platform }}
-          # 先按 digest 推送单架构镜像，最后由 merge job 汇总为多架构 manifest
-          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true
+          # 先按 digest 推送单架构镜像，最后由 merge job 汇总为多架构 manifest。
+          # push-by-digest 只是“不带标签地推送”，并不隐含 push=true；缺少 push=true 时镜像
+          # 只存在于构建机本地，导出的 digest 在 registry 上解析不到，merge 会报 not found
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -141,6 +143,8 @@ jobs:
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf "${{ steps.image.outputs.name }}@sha256:%s " *)
 
+      # version 只在 v* 标签推送时才非空；普通提交时拼出的 "镜像名:" 是非法引用
       - name: Inspect image
+        if: steps.meta.outputs.version != ''
         run: |
           docker buildx imagetools inspect ${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}
