@@ -8,7 +8,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
@@ -37,6 +36,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # GHCR 要求仓库名全小写，而 github.repository 可能含大写（如 LibreSpark/LibreTTS），
+      # 直接拼进镜像名会让 buildx 报 invalid reference format；Actions 表达式没有 lower()，只能用 shell 转
+      - name: Set lowercase image name
+        id: image
+        run: echo "name=$REGISTRY/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -51,7 +56,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.image.outputs.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
@@ -69,7 +74,7 @@ jobs:
           cache-from: type=gha,scope=${{ github.ref_name }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-${{ matrix.platform }}
           # 先按 digest 推送单架构镜像，最后由 merge job 汇总为多架构 manifest
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true
 
       - name: Export digest
         run: |
@@ -104,6 +109,10 @@ jobs:
           pattern: digests-*
           merge-multiple: true
 
+      - name: Set lowercase image name
+        id: image
+        run: echo "name=$REGISTRY/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -118,7 +127,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.image.outputs.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
@@ -130,8 +139,8 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s " *)
+            $(printf "${{ steps.image.outputs.name }}@sha256:%s " *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}
