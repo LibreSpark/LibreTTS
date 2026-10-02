@@ -1,8 +1,8 @@
 name: Docker Image
 
+# 只在打标签时构建发布；日常提交不再触发镜像构建
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -57,11 +57,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
+          # 现在只按标签触发，is_default_branch 恒为 false，latest / sha 不再加该条件
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=long,prefix=,enable={{is_default_branch}}
+            type=sha,format=long,prefix=
 
       - name: Build and push by digest (${{ matrix.platform }})
         id: build
@@ -130,11 +131,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
+          # 现在只按标签触发，is_default_branch 恒为 false，latest / sha 不再加该条件
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=long,prefix=,enable={{is_default_branch}}
+            type=sha,format=long,prefix=
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
